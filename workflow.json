@@ -1,0 +1,1880 @@
+{
+  "name": "My workflow 2",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "seconds",
+              "secondsInterval": 15
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -2128,
+        1056
+      ],
+      "id": "579fa986-503f-4c82-8a32-24ffb7844941",
+      "name": "Job Polling Timer (15s)"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "admins",
+        "returnAll": true,
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "status",
+              "condition": "eq",
+              "keyValue": "active"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -1888,
+        1056
+      ],
+      "id": "c2a29f4c-b98b-4a6b-ae48-175e8e7cc125",
+      "name": "Get Active Admins",
+      "credentials": {
+        "supabaseApi": {
+          "id": "dEK34JReVbRZ4xgh",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get admin with available job capacity\nconst admins = $input.all().map(item => item.json);\nconst availableAdmins = [];\n\nfor (const admin of admins) {\n  // Check current running jobs for this admin\n  const runningJobsQuery = {\n    admin_id: admin.id,\n    status: 'running'\n  };\n  \n  availableAdmins.push({\n    ...admin,\n    // We'll check running jobs in the next step\n    priority: admin.max_concurrent_jobs || 3\n  });\n}\n\n// Sort by priority (max concurrent jobs desc)\navailableAdmins.sort((a, b) => b.priority - a.priority);\n\nreturn availableAdmins.map(admin => ({ json: admin }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1648,
+        1056
+      ],
+      "id": "681fe305-ba21-49d5-bd16-de640444b028",
+      "name": "Process Admin Capacity"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "scrape_jobs",
+        "returnAll": true,
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "status",
+              "condition": "eq",
+              "keyValue": "pending"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -1408,
+        1056
+      ],
+      "id": "59a4003f-7caf-4718-b4cf-abcd966f2d87",
+      "name": "Get Pending Jobs",
+      "credentials": {
+        "supabaseApi": {
+          "id": "dEK34JReVbRZ4xgh",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "has-pending-jobs",
+              "leftValue": "={{ $input.all().length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -1168,
+        1056
+      ],
+      "id": "a1be75a7-7dc9-4a97-85ac-908aa0cc9935",
+      "name": "Has Pending Jobs?"
+    },
+    {
+      "parameters": {
+        "jsCode": "const admins = $('Process Admin Capacity').all().map(item => item.json);\nconst pendingJobs = $('Get Pending Jobs').all().map(item => item.json);\n\nif (!pendingJobs.length) {\n  console.log('No pending jobs found');\n  return [];\n}\n\nif (!admins.length) {\n  console.log('No active admins found');  \n  return [];\n}\n\nconsole.log(`Found ${admins.length} active admins and ${pendingJobs.length} pending jobs`);\n\nconst jobAssignments = [];\n\n// SIMPLE ROUND-ROBIN ASSIGNMENT\nfor (let jobIndex = 0; jobIndex < pendingJobs.length && jobIndex < admins.length; jobIndex++) {\n  const job = pendingJobs[jobIndex];\n  const admin = admins[jobIndex % admins.length]; // Round-robin assignment\n  \n  // NO KEYWORD CHECKING - ANY ADMIN CAN TAKE ANY JOB\n  jobAssignments.push({\n    job_id: job.id,\n    admin_id: admin.id,\n    admin_email: admin.email,\n    admin_name: admin.name,\n    area_id: job.area_id,\n    keyword: job.keyword,\n    created_at: job.created_at,\n    // Add completion webhook URL \n    completion_webhook: `${$vars.N8N_WEBHOOK_URL || 'http://localhost:5678/webhook'}/job-completion`\n  });\n  \n  console.log(`Assigned job ${job.id} (${job.keyword}) to admin ${admin.email} (ID: ${admin.id})`);\n}\n\nconsole.log(`Total assignments made: ${jobAssignments.length}`);\nreturn jobAssignments.map(assignment => ({ json: assignment }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -928,
+        976
+      ],
+      "id": "cce98103-135c-4968-98fc-0a5abf471c8d",
+      "name": "Match Jobs to Admins"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "has-assignments",
+              "leftValue": "={{ $input.all().length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -688,
+        976
+      ],
+      "id": "5d0467c0-6672-477d-a3d5-b51dc281abd7",
+      "name": "Has Job Assignments?"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "scrape_jobs",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $json.job_id }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "status",
+              "fieldValue": "running"
+            },
+            {
+              "fieldId": "assigned_to",
+              "fieldValue": "={{ $json.admin_id }}"
+            },
+            {
+              "fieldId": "started_at",
+              "fieldValue": "={{ new Date().toISOString() }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -448,
+        896
+      ],
+      "id": "89808598-d347-4ea2-aa7f-43a418e0bc09",
+      "name": "Claim Job (Update Status)",
+      "credentials": {
+        "supabaseApi": {
+          "id": "dEK34JReVbRZ4xgh",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "tableId": "areas",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "keyValue": "={{ $json.area_id }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -208,
+        896
+      ],
+      "id": "1978a2e3-59eb-4b15-b0fd-ee9dc12dcb68",
+      "name": "Get Area Details",
+      "credentials": {
+        "supabaseApi": {
+          "id": "dEK34JReVbRZ4xgh",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "tableId": "cities",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "keyValue": "={{ $json.city_id }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        32,
+        896
+      ],
+      "id": "7692835a-acb8-4637-a873-25993415a478",
+      "name": "Get City Details",
+      "credentials": {
+        "supabaseApi": {
+          "id": "dEK34JReVbRZ4xgh",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare job data for the Python scraper server\nconst jobData = $('Claim Job (Update Status)').first().json;\nconst areaData = $('Get Area Details').first().json;\nconst cityData = $('Get City Details').first().json;\nconst countryData = $('Get Country Details1').first().json;\n\n// Build the area name for Google Maps search\nconst areaName = `${areaData.name}, ${cityData.name}, ${countryData.name}`;\n\n// Prepare the payload for the async scraper\nconst scraperPayload = {\n  job_id: jobData.id,\n  area_id: areaData.id,\n  keyword: jobData.keyword,\n  search_term: jobData.keyword,\n  area_name: areaName,\n  area_full_name: areaName,\n  city_name: cityData.name,\n  country_name: countryData.name,\n  admin_id: jobData.assigned_to,\n  max_results: 3, // Default, can be made configurable\n  completion_webhook: \"http://localhost:5678/webhook/job-completion\"\n};\n\nconsole.log(`Prepared scraper payload for job ${jobData.id}:`, scraperPayload);\n\nreturn {\n  json: scraperPayload\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        512,
+        896
+      ],
+      "id": "289782e0-d57f-43fe-9e7c-06149b38c57e",
+      "name": "Prepare Scraper Payload"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:5000/scrape-single",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {
+          "timeout": 60060000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        752,
+        896
+      ],
+      "id": "165860d6-2f70-4f42-91b9-15150aed7626",
+      "name": "Send Job to Scraper Server"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "scraper-success",
+              "leftValue": "={{ $json.success }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        992,
+        896
+      ],
+      "id": "35ca8492-52e6-4aa1-8c87-8a26e6979ed4",
+      "name": "Scraper Started Successfully?"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "scrape_jobs",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $('Send Job to Scraper Server').first().json.job_id }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "status",
+              "fieldValue": "failed"
+            },
+            {
+              "fieldId": "error_message",
+              "fieldValue": "={{ $('Send Job to Scraper Server').first().json.error || 'Failed to start scraper' }}"
+            },
+            {
+              "fieldId": "completed_at",
+              "fieldValue": "={{ new Date().toISOString() }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1232,
+        976
+      ],
+      "id": "0bfb1d1e-7507-4f76-9000-c9d67851b361",
+      "name": "Mark Job as Failed",
+      "credentials": {
+        "supabaseApi": {
+          "id": "dEK34JReVbRZ4xgh",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "scrape_jobs",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $json.body.job_id }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "status",
+              "fieldValue": "completed"
+            },
+            {
+              "fieldId": "businesses_found",
+              "fieldValue": "={{ $json.body.businesses_found || 0 }}"
+            },
+            {
+              "fieldId": "processing_time_seconds",
+              "fieldValue": "={{ $json.body.processing_time || 0 }}"
+            },
+            {
+              "fieldId": "completed_at",
+              "fieldValue": "={{ new Date().toISOString() }}"
+            },
+            {
+              "fieldId": "logs",
+              "fieldValue": "={{ JSON.stringify($json.body) }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -1648,
+        1376
+      ],
+      "id": "ff7e751a-e1fb-4ad4-8881-b667d3618b8e",
+      "name": "Mark Job as Completed",
+      "credentials": {
+        "supabaseApi": {
+          "id": "dEK34JReVbRZ4xgh",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "scrape_jobs",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $json.body.job_id }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "status",
+              "fieldValue": "failed"
+            },
+            {
+              "fieldId": "error_message",
+              "fieldValue": "={{ $json.body.error_message || 'Job processing failed' }}"
+            },
+            {
+              "fieldId": "businesses_found",
+              "fieldValue": "={{ $json.body.businesses_found || 0 }}"
+            },
+            {
+              "fieldId": "processing_time_seconds",
+              "fieldValue": "={{ $json.body.processing_time || 0 }}"
+            },
+            {
+              "fieldId": "completed_at",
+              "fieldValue": "={{ new Date().toISOString() }}"
+            },
+            {
+              "fieldId": "logs",
+              "fieldValue": "={{ JSON.stringify($json.body) }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -1648,
+        1536
+      ],
+      "id": "206bd5b4-cf73-4b9f-a870-737e07967c83",
+      "name": "Mark Job as Failed (Webhook)",
+      "credentials": {
+        "supabaseApi": {
+          "id": "dEK34JReVbRZ4xgh",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "areas",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $json.body.area_id }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "last_scraped_at",
+              "fieldValue": "={{ new Date().toISOString() }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -1408,
+        1376
+      ],
+      "id": "a78d30e9-90bb-4e8d-b4a9-fd7ab45cca7b",
+      "name": "Update Area Last Scraped",
+      "credentials": {
+        "supabaseApi": {
+          "id": "dEK34JReVbRZ4xgh",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {\n  \"success\": true,\n  \"message\": \"Job completion processed\",\n  \"job_id\": $json.body.job_id,\n  \"status\": $json.body.success ? \"completed\" : \"failed\",\n  \"businesses_found\": $json.body.businesses_found || 0,\n  \"timestamp\": new Date().toISOString()\n} }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        -1168,
+        1456
+      ],
+      "id": "0ed6b65a-62f8-4284-b41f-98cccf9352f7",
+      "name": "Respond to Completion Webhook"
+    },
+    {
+      "parameters": {
+        "content": "## Job Processing Flow\n\n**Timer (15s)** → **Get Admins** → **Match Jobs** → **Claim Job** → **Send to Scraper**\n\n↓\n\n**Webhook Response** → **Update Job Status** → **Update Area Timestamp**",
+        "height": 1184,
+        "width": 3800
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -2336,
+        656
+      ],
+      "typeVersion": 1,
+      "id": "650a5e66-cfeb-400d-a197-3c56217155ae",
+      "name": "Workflow Description"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "tableId": "countries",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "keyValue": "={{ $json.country_id }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        272,
+        896
+      ],
+      "id": "0fd95f0b-7737-4895-9719-8a5d12085db9",
+      "name": "Get Country Details1",
+      "credentials": {
+        "supabaseApi": {
+          "id": "dEK34JReVbRZ4xgh",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "job-completion",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -2128,
+        1456
+      ],
+      "id": "ced3fa70-1778-43e2-8995-e31eb642118f",
+      "name": "Job Completion Webhook1",
+      "webhookId": "job-completion-webhook-id"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "job-successful",
+              "leftValue": "={{ $json.body.success }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -1888,
+        1456
+      ],
+      "id": "68010cef-1fd6-49fc-8b87-ec8f76aa8a1c",
+      "name": "Job Completed Successfully?1"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "has-country",
+              "leftValue": "={{ $json.id }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -1488,
+        96
+      ],
+      "id": "b0da2f84-36c4-4ced-b3f6-61e398576ee2",
+      "name": "Check Country Exists"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "has-cities-or-force",
+              "leftValue": "={{ $('Check Country Exists').item.json.cities_populated }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -1040,
+        -32
+      ],
+      "id": "698ededa-5363-4c01-8dff-5adc4968a1ee",
+      "name": "Check Cities Needed"
+    },
+    {
+      "parameters": {
+        "prompt": "=You are a highly knowledgeable geographic data expert specializing in global urban development and economic geography. Your role is to accurately identify and recommend major cities within a given country that are most relevant for business directory and commercial analysis purposes. These cities should include key metropolitan areas, commercial hubs, economic centers, and population-dense urban regions that are likely to have a strong presence of businesses and services.",
+        "messages": {
+          "messageValues": [
+            {
+              "type": "HumanMessagePromptTemplate",
+              "message": "=List the 20 most important cities in {{ $('Check Country Exists').item.json.name }} for business directory purposes. These should be major metropolitan areas, economic centers, or business hubs.\n\nReturn data in the following clean JSON format (no markdown, no code block, no additional explanation and no ''''):\n\n{\n  \"cities\": [\n    { \"name\": \"City1\" },\n    { \"name\": \"City2\" },\n    { \"name\": \"City3\" },\n    ...\n  ]\n}\n"
+            }
+          ]
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1,
+      "position": [
+        -784,
+        96
+      ],
+      "id": "6fa07575-ba92-44ff-98ff-296e1afd53f1",
+      "name": "Generate Cities via LLM"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Handle errors\nconst error = $json.error || $json.message || 'Unknown error occurred';\n\nconsole.error('Workflow error:', error);\n\nreturn {\n  success: false,\n  error: error,\n  timestamp: new Date().toISOString()\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1040,
+        192
+      ],
+      "id": "d0db9a44-7153-4c7f-91aa-ed3175f33e40",
+      "name": "Error Handler"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "populate-country",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1936,
+        96
+      ],
+      "id": "4ac0fb66-45be-4680-8229-97f244877778",
+      "name": "Populate Country Webhook1",
+      "webhookId": "d33fa1bc-ee0f-4d0c-8d24-a1e6de2be400"
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.0-flash",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        -816,
+        320
+      ],
+      "id": "93fb91fc-b85b-4692-8ebc-9eaea1e6808a",
+      "name": "Google Gemini Chat Model1",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "NnrpnbbQC17t1wHg",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.0-pro-exp",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        -688,
+        320
+      ],
+      "id": "6bc70ab1-802b-4497-9e93-54e550016b60",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "NnrpnbbQC17t1wHg",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"cities\": [\n    { \"name\": \"Mumbai\" },\n    { \"name\": \"Delhi\" },\n    { \"name\": \"Bengaluru\" },\n    { \"name\": \"Chennai\" },\n    { \"name\": \"Hyderabad\" },\n    { \"name\": \"Ahmedabad\" },\n    { \"name\": \"Pune\" },\n    { \"name\": \"Kolkata\" },\n    { \"name\": \"Surat\" },\n    { \"name\": \"Lucknow\" },\n    { \"name\": \"Jaipur\" },\n    { \"name\": \"Chandigarh\" },\n    { \"name\": \"Indore\" },\n    { \"name\": \"Coimbatore\" },\n    { \"name\": \"Kochi\" }\n  ]\n}\n"
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        -560,
+        320
+      ],
+      "id": "9608f0c9-e7e1-4587-b9c8-9163cfaa9801",
+      "name": "Structured Output Parser"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "countries",
+        "returnAll": true,
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $json.body.country_id }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -1712,
+        96
+      ],
+      "id": "1701384d-5669-4ae4-ab52-7f91ec490bbe",
+      "name": "Get Country Details",
+      "credentials": {
+        "supabaseApi": {
+          "id": "dEK34JReVbRZ4xgh",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "cities",
+        "returnAll": true,
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "country_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.id }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -1264,
+        16
+      ],
+      "id": "13f39738-03ea-4664-b13c-88d674edf051",
+      "name": "Get Existing Cities",
+      "alwaysOutputData": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "dEK34JReVbRZ4xgh",
+          "name": "Supabase account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const countryDetails =  $('Check Country Exists').first().json.name // Adjust if the country details node name is different\nconst input = $input.first().json;\n\nconsole.log('Raw Input:', input);\n\nlet cities = [];\n\ntry {\n  if (\n    input.output &&\n    Array.isArray(input.output.cities)\n  ) {\n    cities = input.output.cities\n      .map(city => city.name?.trim())\n      .filter(Boolean);\n  } else {\n    throw new Error('Expected \"output.cities\" structure not found');\n  }\n} catch (err) {\n  throw new Error(`Failed to extract cities: ${err.message}`);\n}\n\n// Clean and limit\nconst cleanCities = cities\n  .filter(city => typeof city === 'string' && city.length > 1)\n  .slice(0, 50); // Adjust max if needed\n\nif (cleanCities.length === 0) {\n  throw new Error('No valid cities extracted from LLM response');\n}\n\n// Format for DB insert\nconst cityRecords = cleanCities.map(cityName => ({\n  country_id: $('Check Country Exists').first().json.id,\n  name: cityName,\n  areas_populated: false,\n  areas_count: 0,\n}));\n\nreturn {\n  country_id: $('Check Country Exists').first().json.id,\n  country_name: $('Check Country Exists').first().json.name,\n  cities_count: cityRecords.length,\n  cities: cityRecords,\n  source: 'ai_generated'\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -352,
+        96
+      ],
+      "id": "e973a1ed-c356-45b9-9c06-d8cff8f75640",
+      "name": "Clean AI Cities (for Databse)"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://rchtpjzauzntftiqttqo.supabase.co/rest/v1/cities",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.cities }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -128,
+        96
+      ],
+      "id": "dfb29ca2-6c33-43b8-979f-098816fa00dd",
+      "name": "Insert All Cities (In Database)",
+      "credentials": {
+        "supabaseApi": {
+          "id": "dEK34JReVbRZ4xgh",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "countries",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $('Get Country Details').item.json.id }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "cities_count",
+              "fieldValue": "={{ $('Clean AI Cities (for Databse)').item.json.cities_count }}"
+            },
+            {
+              "fieldId": "cities_populated",
+              "fieldValue": "TRUE"
+            },
+            {
+              "fieldId": "cities_populated_at",
+              "fieldValue": "={{ new Date().toISOString().replace('T', ' ').replace('Z', '').replace(/(\\.\\d{6})\\d+/, '$1') }}\n"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        96,
+        96
+      ],
+      "id": "7735d421-fc06-4e59-b85f-0e8c50de614b",
+      "name": "Update Country Status",
+      "credentials": {
+        "supabaseApi": {
+          "id": "dEK34JReVbRZ4xgh",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "cities",
+        "returnAll": true,
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "country_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.id }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        320,
+        96
+      ],
+      "id": "34b086da-1a6f-424c-ae61-5881fb2df0f4",
+      "name": "Get Existing Cities (DB)",
+      "credentials": {
+        "supabaseApi": {
+          "id": "dEK34JReVbRZ4xgh",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "has-cities-or-force",
+              "leftValue": "={{ $json.areas_populated }}",
+              "rightValue": "={{ true }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -1376,
+        -752
+      ],
+      "id": "c16767a8-dd40-4182-94ca-9c36f3c1ffa0",
+      "name": "Check Areas Needed"
+    },
+    {
+      "parameters": {
+        "content": "## Populate areas for selected city\nThis will be the area for -> When user selects the city, and this section will auto populate areas or fetch them from the DB (if already exists)\n",
+        "height": 688,
+        "width": 2512
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1952,
+        -992
+      ],
+      "typeVersion": 1,
+      "id": "1b6dd5fe-01aa-44b5-8ebc-fa2b742226cb",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "areas",
+        "returnAll": true,
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "city_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.id }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        128,
+        -816
+      ],
+      "id": "f80a4ed4-2697-446c-bc8f-ea77147d943b",
+      "name": "Fetch All Areas from DB",
+      "credentials": {
+        "supabaseApi": {
+          "id": "dEK34JReVbRZ4xgh",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "tableId": "cities",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "keyValue": "={{ $json.body.city_id }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -1616,
+        -688
+      ],
+      "id": "92bf29bb-9539-4700-9d7e-b655d996b5c9",
+      "name": "Get City details",
+      "credentials": {
+        "supabaseApi": {
+          "id": "dEK34JReVbRZ4xgh",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "tableId": "countries",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "keyValue": "={{ $json.country_id }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -1168,
+        -576
+      ],
+      "id": "66f0e7cc-6810-4722-a282-6cb90cad70e8",
+      "name": "Fetch Country Details (for prompt)",
+      "credentials": {
+        "supabaseApi": {
+          "id": "dEK34JReVbRZ4xgh",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=\nCity: {{ $('Get City details').item.json.name }}\nCountry: {{ $json.name }}\n\nRequirements:\nIdentify and list major well-known areas commonly included in business addresses, commercial hubs, and recognized neighborhoods and separate entries for sub-phases of housing or common societies.\nFocus particularly on areas that hold significant relevance for businesses.\nReturn a total of 20 areas and incase there are phases as well for any society you may return exactly 20 unqiue areas and their corresponding phases(if any). \nRemove any brackets from the names i want simple text for each area\n{\n  \"areas\": [\n    { \"name\": \"Area 1\" },\n    { \"name\": \"Area 2\" },\n    ...\n  ]\n}\n\nDo not add any commentary, markdown, or explanation — just return valid JSON.\n",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "You are an intelligent data assistant helping build a business directory. Your task is to list the most relevant neighborhoods or localities (called \"areas\") within a given city for a country that are useful for business listings."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.1,
+      "position": [
+        -944,
+        -672
+      ],
+      "id": "d8fc9115-6bdc-4c72-b83d-9337f9cc6918",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.0-flash-thinking-exp-1219",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        -912,
+        -448
+      ],
+      "id": "212eb59e-732c-4b76-b4c0-1c192a34278a",
+      "name": "Google Gemini Chat Model4",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "NnrpnbbQC17t1wHg",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"areas\": [\n    { \"name\": \"Gulberg\" },\n    { \"name\": \"Model Town\" },\n    { \"name\": \"DHA\" },\n    { \"name\": \"Johar Town\" },\n    { \"name\": \"Wapda Town\" },\n    { \"name\": \"Bahria Town\" },\n    { \"name\": \"Garden Town\" },\n    { \"name\": \"Allama Iqbal Town\" },\n    { \"name\": \"Faisal Town\" },\n    { \"name\": \"Cantt\" },\n    { \"name\": \"Shadman\" },\n    { \"name\": \"Iqbal Town\" }\n  ]\n}\n"
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        -784,
+        -448
+      ],
+      "id": "3e1a020f-0d02-4e84-b200-4c1c53024790",
+      "name": "Structured Output Parser2"
+    },
+    {
+      "parameters": {
+        "jsCode": "// N8N JavaScript Code Block - Transform LLM Areas Output for Database Insertion\n\n// Input data from previous node - handle different input formats\nconst inputData = $input.all()[0].json;\n\n// Debug: log the input structure to understand the data format\nconsole.log(\"Input data structure:\", JSON.stringify(inputData, null, 2));\n\n// Extract areas from the nested structure - handle different possible formats\nlet areasData;\nif (inputData.output && inputData.output.areas) {\n    // Format: { \"output\": { \"areas\": [...] } }\n    areasData = inputData.output.areas;\n} else if (Array.isArray(inputData) && inputData[0] && inputData[0].output && inputData[0].output.areas) {\n    // Format: [{ \"output\": { \"areas\": [...] } }]\n    areasData = inputData[0].output.areas;\n} else if (inputData.areas) {\n    // Format: { \"areas\": [...] }\n    areasData = inputData.areas;\n} else {\n    throw new Error(\"Cannot find areas data in input. Please check the input structure.\");\n}\n\n// Transform areas data to match the required format\nconst transformedAreas = areasData.map(area => {\n    return {\n        city_id: $('Get City details').first().json.id, // You'll need to set this based on your city lookup logic\n        name: area.name,\n        last_scraped_at: null, // Set to null as requested\n        created_at: new Date().toISOString() // Current timestamp\n    };\n});\n\n// Return in the structured format similar to your example\nconst result = [{\n    city_id: $('Get City details').first().json.id, // Set this to the actual city ID\n    city_name: $('Get City details').first().json.name, // Set this to the actual city name\n    areas_count: transformedAreas.length,\n    areas: transformedAreas,\n    source: \"ai_generated\"\n}];\n\n// Return the result for n8n\nreturn result.map(item => ({ json: item }));\n\n// Alternative: If you have city information available from a previous node\n/*\n// Assuming you have city info from a previous node\nconst cityInfo = $node[\"Previous City Node\"].json; // Adjust node name as needed\n\nconst result = [{\n    city_id: cityInfo.city_id,\n    city_name: cityInfo.city_name,\n    areas_count: transformedAreas.length,\n    areas: transformedAreas,\n    source: \"ai_generated\"\n}];\n*/"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -544,
+        -576
+      ],
+      "id": "3b55b463-3d06-447e-8d2b-dd922b454454",
+      "name": "Get Ready for Database Insertion"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "populateareas",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1840,
+        -688
+      ],
+      "id": "232e110b-c4d0-4ac1-9ded-7ff4fbcce779",
+      "name": "Populate Areas",
+      "webhookId": "3cbf8c56-f36c-4375-b211-bfac8c1d4e9a"
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        544,
+        -32
+      ],
+      "id": "9bc60b37-fb0a-434d-ae66-1ef17ca3c5e4",
+      "name": "Return Cities List"
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        352,
+        -688
+      ],
+      "id": "4e2a502c-0c14-44a5-84fc-132f164720f6",
+      "name": "Return Areas"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://rchtpjzauzntftiqttqo.supabase.co/rest/v1/areas",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.areas }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -320,
+        -576
+      ],
+      "id": "10307e6f-f5ce-4a03-9c31-c7631d76d0d7",
+      "name": "Insert All Areas(In Database)",
+      "alwaysOutputData": false,
+      "credentials": {
+        "supabaseApi": {
+          "id": "dEK34JReVbRZ4xgh",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "cities",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $('Get City details').item.json.id }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "areas_populated",
+              "fieldValue": "TRUE"
+            },
+            {
+              "fieldId": "areas_populated_at",
+              "fieldValue": "={{ new Date().toISOString().replace('T', ' ').replace('Z', '').replace(/(\\.\\d{6})\\d+/, '$1') }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -96,
+        -576
+      ],
+      "id": "c7167507-efb7-46c1-8fc2-10c4e785a414",
+      "name": "Update a row",
+      "credentials": {
+        "supabaseApi": {
+          "id": "dEK34JReVbRZ4xgh",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "areas",
+        "returnAll": true,
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "city_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.id }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        128,
+        -576
+      ],
+      "id": "506e4470-bce5-4e8e-b374-178c620854cb",
+      "name": "Get many rows",
+      "credentials": {
+        "supabaseApi": {
+          "id": "dEK34JReVbRZ4xgh",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Fetch Countries and populate cities\nSection: User selects a country -> Fetch Cities (if existing from DB) or populate them from LLM",
+        "height": 640,
+        "width": 2752
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1952,
+        -112
+      ],
+      "typeVersion": 1,
+      "id": "ac2f1c93-67a1-4dd4-aeaf-4854c34f9f00",
+      "name": "Sticky Note1"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Job Polling Timer (15s)": {
+      "main": [
+        [
+          {
+            "node": "Get Active Admins",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Active Admins": {
+      "main": [
+        [
+          {
+            "node": "Process Admin Capacity",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Admin Capacity": {
+      "main": [
+        [
+          {
+            "node": "Get Pending Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Pending Jobs": {
+      "main": [
+        [
+          {
+            "node": "Has Pending Jobs?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Pending Jobs?": {
+      "main": [
+        [
+          {
+            "node": "Match Jobs to Admins",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Match Jobs to Admins": {
+      "main": [
+        [
+          {
+            "node": "Has Job Assignments?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Job Assignments?": {
+      "main": [
+        [
+          {
+            "node": "Claim Job (Update Status)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim Job (Update Status)": {
+      "main": [
+        [
+          {
+            "node": "Get Area Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Area Details": {
+      "main": [
+        [
+          {
+            "node": "Get City Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get City Details": {
+      "main": [
+        [
+          {
+            "node": "Get Country Details1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Scraper Payload": {
+      "main": [
+        [
+          {
+            "node": "Send Job to Scraper Server",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Job to Scraper Server": {
+      "main": [
+        [
+          {
+            "node": "Scraper Started Successfully?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scraper Started Successfully?": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Mark Job as Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Job as Completed": {
+      "main": [
+        [
+          {
+            "node": "Update Area Last Scraped",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Job as Failed (Webhook)": {
+      "main": [
+        [
+          {
+            "node": "Respond to Completion Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Area Last Scraped": {
+      "main": [
+        [
+          {
+            "node": "Respond to Completion Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Country Details1": {
+      "main": [
+        [
+          {
+            "node": "Prepare Scraper Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Job Completion Webhook1": {
+      "main": [
+        [
+          {
+            "node": "Job Completed Successfully?1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Job Completed Successfully?1": {
+      "main": [
+        [
+          {
+            "node": "Mark Job as Completed",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Job as Failed (Webhook)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Country Exists": {
+      "main": [
+        [
+          {
+            "node": "Get Existing Cities",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Handler",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Cities Needed": {
+      "main": [
+        [
+          {
+            "node": "Generate Cities via LLM",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return Cities List",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Populate Country Webhook1": {
+      "main": [
+        [
+          {
+            "node": "Get Country Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Generate Cities via LLM",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Generate Cities via LLM",
+            "type": "ai_languageModel",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Generate Cities via LLM",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Country Details": {
+      "main": [
+        [
+          {
+            "node": "Check Country Exists",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Existing Cities": {
+      "main": [
+        [
+          {
+            "node": "Check Cities Needed",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Handler",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Cities via LLM": {
+      "main": [
+        [
+          {
+            "node": "Clean AI Cities (for Databse)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clean AI Cities (for Databse)": {
+      "main": [
+        [
+          {
+            "node": "Insert All Cities (In Database)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert All Cities (In Database)": {
+      "main": [
+        [
+          {
+            "node": "Update Country Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Country Status": {
+      "main": [
+        [
+          {
+            "node": "Get Existing Cities (DB)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Areas Needed": {
+      "main": [
+        [
+          {
+            "node": "Fetch All Areas from DB",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fetch Country Details (for prompt)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get City details": {
+      "main": [
+        [
+          {
+            "node": "Check Areas Needed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Country Details (for prompt)": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model4": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser2": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Get Ready for Database Insertion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Populate Areas": {
+      "main": [
+        [
+          {
+            "node": "Get City details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Existing Cities (DB)": {
+      "main": [
+        [
+          {
+            "node": "Return Cities List",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch All Areas from DB": {
+      "main": [
+        [
+          {
+            "node": "Return Areas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Ready for Database Insertion": {
+      "main": [
+        [
+          {
+            "node": "Insert All Areas(In Database)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert All Areas(In Database)": {
+      "main": [
+        [
+          {
+            "node": "Update a row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update a row": {
+      "main": [
+        [
+          {
+            "node": "Get many rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get many rows": {
+      "main": [
+        [
+          {
+            "node": "Return Areas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "5dd30252-eb15-44e1-8f4b-09d32a44b811",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "f76696ff5fb3d963bb3786a6f746525544411f4a97397bd0e45a2000acf2dddb"
+  },
+  "id": "nJhLuKtjvOaprZtQ",
+  "tags": []
+}
