@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
 import { Notification } from '../common/Notification';
@@ -12,7 +12,7 @@ interface LayoutProps {
 }
 
 const sectionTitles: Record<string, string> = {
-  'dashboard': 'Location Management',
+  'dashboard': 'Dashboard',
   'countries-management': 'Countries Management',
   'cities-management': 'Cities Management',
   'areas-management': 'Areas Management',
@@ -30,11 +30,11 @@ export const Layout: React.FC<LayoutProps> = ({
   const { isOpen, isMobile, closeSidebar } = useSidebar();
 
   return (
-    <div className="flex min-h-screen bg-gray-100">
+    <div className="flex min-h-screen bg-gray-50">
       {/* Mobile overlay */}
       {isMobile && isOpen && (
         <div 
-          className="fixed inset-0 bg-black/50 backdrop-blur-sm z-40 lg:hidden animate-fade-in"
+          className="fixed inset-0 bg-black/30 backdrop-blur-sm z-40 lg:hidden animate-fade-in"
           onClick={closeSidebar}
         />
       )}
@@ -42,15 +42,15 @@ export const Layout: React.FC<LayoutProps> = ({
       <Sidebar currentSection={currentSection} onSectionChange={onSectionChange} />
       
       <main className={`
-        flex-1 bg-gray-50 transition-all duration-300 ease-smooth
-        ${!isMobile && isOpen ? 'ml-72' : 'ml-0'}
+        flex-1 transition-all duration-300 ease-smooth min-w-0
+        ${!isMobile && isOpen ? 'lg:ml-72' : 'ml-0'}
       `}>
         <TopBar 
           title={sectionTitles[currentSection] || 'Dashboard'} 
           onOpenSettings={onOpenSettings}
         />
         
-        <div className="px-6 py-6">
+        <div className="px-4 lg:px-6 py-6">
           {children}
         </div>
       </main>

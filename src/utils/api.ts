@@ -1,6 +1,15 @@
 import { getConfig } from './config';
 import type { Country, City, Area, ScrapeJob, Business, BusinessInteraction } from './types';
 
+interface Admin {
+  id: number;
+  email: string;
+  name: string;
+  status: string;
+  supported_keywords: string[];
+  max_concurrent_jobs: number;
+}
+
 export class ApiError extends Error {
   constructor(message: string, public status?: number) {
     super(message);
@@ -186,8 +195,11 @@ export const businessApi = {
     has_phone?: boolean;
     has_website?: boolean;
     assigned_marketer?: number;
+    limit?: number;
+    offset?: number;
   }): Promise<Business[]> => {
-    let query = 'businesses?select=*,areas(name,cities(name,countries(name))),scrape_jobs(keyword)&order=created_at.desc';
+    // Optimized field selection - only fetch what we need for the list view
+    let query = 'businesses?select=id,name,address,phone,website,category,rating,review_count,status,contact_status,last_contacted_at,next_followup_at,notes,assigned_marketer,created_at,updated_at,areas(name,cities(name,countries(name))),scrape_jobs(keyword)&order=created_at.desc';
     
     if (filters) {
       const conditions = [];
@@ -200,6 +212,10 @@ export const businessApi = {
       if (filters.has_phone) conditions.push('phone=not.is.null');
       if (filters.has_website) conditions.push('website=not.is.null');
       if (filters.assigned_marketer) conditions.push(`assigned_marketer=eq.${filters.assigned_marketer}`);
+      
+      // Add pagination
+      if (filters.limit) conditions.push(`limit=${filters.limit}`);
+      if (filters.offset) conditions.push(`offset=${filters.offset}`);
       
       if (conditions.length > 0) {
         query += '&' + conditions.join('&');
@@ -238,6 +254,27 @@ export const businessApi = {
         updated_at: new Date().toISOString()
       })
     }),
+
+  updateField: (id: number, field: string, value: string | number | null): Promise<Business> => {
+    // Validate field against database schema
+    const allowedFields = [
+      'name', 'address', 'phone', 'website', 'category', 'rating', 'review_count',
+      'latitude', 'longitude', 'status', 'contact_status', 'last_contacted_at', 
+      'next_followup_at', 'notes', 'assigned_marketer'
+    ];
+    
+    if (!allowedFields.includes(field)) {
+      throw new Error(`Field '${field}' is not allowed for update`);
+    }
+
+    return apiCall(`businesses?id=eq.${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        [field]: value,
+        updated_at: new Date().toISOString()
+      })
+    });
+  },
 
   updateStatus: (id: number, status: Business['status'], notes?: string): Promise<Business> =>
     apiCall(`businesses?id=eq.${id}`, {
@@ -296,7 +333,33 @@ export const businessApi = {
 // Business Interactions API functions
 export const businessInteractionApi = {
   getByBusinessId: (business_id: number): Promise<BusinessInteraction[]> =>
-    apiCall(`business_interactions?business_id=eq.${business_id}&order=timestamp.desc`),
+    apiCall(`business_interactions?business_id=eq.${business_id}&select=id,action,details,timestamp,user_id&order=timestamp.desc`),
+
+  getAll: (filters?: {
+    action?: string;
+    search?: string;
+    business_id?: number;
+    user_id?: number;
+    from?: string; // ISO
+    to?: string;   // ISO
+    limit?: number;
+  }): Promise<BusinessInteraction[]> => {
+    let query = `business_interactions?select=id,business_id,user_id,action,details,timestamp,businesses(name,areas(name,cities(name)))&order=timestamp.desc`;
+    const conditions: string[] = [];
+    if (filters?.action && filters.action !== 'all') conditions.push(`action=eq.${filters.action}`);
+    if (filters?.business_id) conditions.push(`business_id=eq.${filters.business_id}`);
+    if (filters?.user_id) conditions.push(`user_id=eq.${filters.user_id}`);
+    if (filters?.from) conditions.push(`timestamp=gte.${filters.from}`);
+    if (filters?.to) conditions.push(`timestamp=lte.${filters.to}`);
+    if (filters?.search) {
+      // details is jsonb, using ilike on text cast
+      conditions.push(`or=(details::text.ilike.*${filters.search}*)`);
+    }
+    // Add pagination support
+    if (filters?.limit) conditions.push(`limit=${filters.limit}`);
+    if (conditions.length) query += `&${conditions.join('&')}`;
+    return apiCall(query);
+  },
 
   create: (data: Omit<BusinessInteraction, 'id' | 'timestamp'>): Promise<BusinessInteraction> =>
     apiCall('business_interactions', {
@@ -341,6 +404,36 @@ export const businessInteractionApi = {
         details: { subject, outcome },
         timestamp: new Date().toISOString()
       })
+    })
+};
+
+// Authentication API functions
+export const authApi = {
+  login: async (email: string, password: string): Promise<Admin> => {
+    // For demo purposes, we'll simulate authentication
+    // In a real app, this would validate against the database
+    if (password === 'admin123') {
+      try {
+        const admins = await apiCall<Admin[]>(`admins?email=eq.${encodeURIComponent(email)}&select=*`);
+        if (admins && admins.length > 0) {
+          return admins[0];
+        }
+      } catch (error) {
+        console.error('Admin lookup failed:', error);
+      }
+    }
+    throw new ApiError('Invalid credentials', 401);
+  },
+
+  getAdmins: (): Promise<Admin[]> =>
+    apiCall('admins?select=*&order=name.asc'),
+
+  getAdminById: (id: number): Promise<Admin> =>
+    apiCall(`admins?id=eq.${id}&select=*`).then(admins => {
+      if (admins && admins.length > 0) {
+        return admins[0];
+      }
+      throw new ApiError('Admin not found', 404);
     })
 };
 

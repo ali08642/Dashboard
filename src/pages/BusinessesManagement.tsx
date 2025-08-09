@@ -1,7 +1,6 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { 
-  Search, 
-  Filter, 
+  Search,
   Download, 
   Star, 
   Phone, 
@@ -10,42 +9,36 @@ import {
   Calendar,
   ChevronDown,
   ChevronRight,
-  Edit,
-  Trash2,
-  Users,
-  CheckSquare,
   MoreVertical,
   RefreshCw,
-  Plus,
   Building,
   Clock,
-  Mail
+  Users,
+  Target,
+  Activity
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import { DataTable } from '../components/tables/DataTable';
 import { Button } from '../components/common/Button';
 import { Input } from '../components/common/Input';
 import { Select } from '../components/common/Select';
 import { Modal } from '../components/common/Modal';
-import { businessApi, businessInteractionApi, countryApi, cityApi, areaApi } from '../utils/api';
-import type { Business, BusinessInteraction, Country, City, Area } from '../utils/types';
+import { Pagination } from '../components/common/Pagination';
+import { BusinessTableSkeleton, SkeletonStats } from '../components/common/Skeleton';
+import { useBusinesses, useBusinessStats, useBusinessMutation, useInteractionMutation, useBusinessInteractions, QUERY_KEYS } from '../hooks/useOptimizedQuery';
+import { useQueryClient } from '@tanstack/react-query';
+import { businessApi } from '../utils/api';
+import type { Business, BusinessInteraction } from '../utils/types';
 
 export const BusinessesManagement: React.FC = () => {
   const { showNotification, hideNotification } = useApp();
-  
-  // Main state
-  const [loading, setLoading] = useState(true);
-  const [businesses, setBusinesses] = useState<Business[]>([]);
-  const [selectedBusinesses, setSelectedBusinesses] = useState<number[]>([]);
-  const [refreshing, setRefreshing] = useState(false);
-  const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
+  const queryClient = useQueryClient();
   
   // Filter state
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [contactStatusFilter, setContactStatusFilter] = useState<string>('all');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
-  const [locationFilter, setLocationFilter] = useState<{
+  const [locationFilter] = useState<{
     country_id?: number;
     city_id?: number;
     area_id?: number;
@@ -53,163 +46,263 @@ export const BusinessesManagement: React.FC = () => {
   const [ratingFilter, setRatingFilter] = useState<string>('all');
   const [contactFilter, setContactFilter] = useState<string>('all');
   
-  // Location data for filters
-  const [countries, setCountries] = useState<Country[]>([]);
-  const [cities, setCities] = useState<City[]>([]);
-  const [areas, setAreas] = useState<Area[]>([]);
+  // UI state
+  const [selectedBusinesses, setSelectedBusinesses] = useState<number[]>([]);
+  const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize] = useState(50); // Fixed page size for now
+  
+  // Optimized filters - only update when filters actually change
+  const businessFilters = useMemo(() => {
+    const filters: Record<string, unknown> = {};
+    
+    if (searchTerm) filters.search = searchTerm;
+    if (statusFilter !== 'all') filters.status = statusFilter;
+    if (contactStatusFilter !== 'all') filters.contact_status = contactStatusFilter;
+    if (categoryFilter !== 'all') filters.category = categoryFilter;
+    if (locationFilter.area_id) filters.area_id = locationFilter.area_id;
+    if (ratingFilter !== 'all') filters.rating_min = parseFloat(ratingFilter);
+    if (contactFilter === 'has_phone') filters.has_phone = true;
+    if (contactFilter === 'has_website') filters.has_website = true;
+    
+    // Add pagination
+    filters.limit = pageSize;
+    filters.offset = (currentPage - 1) * pageSize;
+
+    return filters;
+  }, [searchTerm, statusFilter, contactStatusFilter, categoryFilter, locationFilter, ratingFilter, contactFilter, currentPage, pageSize]);
+
+  // Use optimized queries
+  const { data: businesses = [], isLoading, error: businessError } = useBusinesses(businessFilters);
+  const { data: globalStats = { total: 0, by_status: {}, by_contact_status: {}, recent_count: 0 }, isLoading: statsLoading, error: statsError, refetch: refetchStats } = useBusinessStats();
+
+  // Ensure stats are fetched when component mounts
+  React.useEffect(() => {
+    console.log('BusinessesManagement component mounted, ensuring stats are loaded...');
+    
+    // Always trigger a fresh fetch on component mount to ensure data is loaded
+    const timeoutId = setTimeout(() => {
+      console.log('Triggering initial stats fetch...');
+      refetchStats();
+    }, 100); // Small delay to ensure component is fully mounted
+    
+    return () => clearTimeout(timeoutId);
+  }, []); // Empty dependency array = run only on mount
+  
+  // Additional check for empty stats
+  React.useEffect(() => {
+    if (!statsLoading && globalStats.total === 0 && !statsError) {
+      console.log('Stats appear empty after loading, triggering refetch...');
+      refetchStats();
+    }
+  }, [refetchStats, statsLoading, globalStats.total, statsError]);
+
+  // Debug logging
+  React.useEffect(() => {
+    console.log('Stats state changed:');
+    console.log('- Loading:', statsLoading);
+    console.log('- Error:', statsError);
+    console.log('- Data:', globalStats);
+    
+    if (globalStats && globalStats.total >= 0) {
+      console.log('Stats updated - Total businesses:', globalStats.total);
+      console.log('- By status:', globalStats.by_status);
+      console.log('- By contact status:', globalStats.by_contact_status);
+      
+      // Also trigger a manual check for any pending queries
+      if (globalStats.total > 0) {
+        console.log('Stats loaded successfully with', globalStats.total, 'businesses');
+      }
+    }
+    if (statsError) {
+      console.error('Stats error:', statsError);
+    }
+  }, [globalStats, statsError, statsLoading]);
+  const businessMutation = useBusinessMutation();
+  const interactionMutation = useInteractionMutation();
   
   // Modal states
-  const [isBulkActionsModalOpen, setIsBulkActionsModalOpen] = useState(false);
   const [businessInteractions, setBusinessInteractions] = useState<{ [key: number]: BusinessInteraction[] }>({});
+  const [statusModal, setStatusModal] = useState<{
+    open: boolean;
+    business: Business | null;
+    newStatus: Business['status'] | null;
+    note: string;
+    saving: boolean;
+  }>({ open: false, business: null, newStatus: null, note: '', saving: false });
 
-  // Stats state
-  const [stats, setStats] = useState<{
-    total: number;
-    by_status: { [key: string]: number };
-    by_contact_status: { [key: string]: number };
-    recent_count: number;
-  }>({
-    total: 0,
-    by_status: {},
-    by_contact_status: {},
-    recent_count: 0
-  });
+  // Inline edit states
+  const [noteDrafts, setNoteDrafts] = useState<{ [key: number]: string }>({});
+  const [editingNoteId, setEditingNoteId] = useState<number | null>(null);
+  const [savingNoteId, setSavingNoteId] = useState<number | null>(null);
+  const [contactDrafts, setContactDrafts] = useState<{ [key: number]: { contact_status: string; next_followup_at?: string } }>({});
+  const [savingContactId, setSavingContactId] = useState<number | null>(null);
+  const [assignedMarketerDrafts, setAssignedMarketerDrafts] = useState<{ [key: number]: string }>({});
+  const [savingAssignedId, setSavingAssignedId] = useState<number | null>(null);
 
-  useEffect(() => {
-    loadInitialData();
-  }, []);
-
-  useEffect(() => {
-    loadBusinesses();
-  }, [searchTerm, statusFilter, contactStatusFilter, categoryFilter, locationFilter, ratingFilter, contactFilter]);
-
-  const loadInitialData = async () => {
-    setLoading(true);
-    try {
-      const [businessesData, countriesData] = await Promise.all([
-        businessApi.getAll(),
-        countryApi.getAll()
-      ]);
-      
-      setBusinesses(businessesData);
-      setCountries(countriesData);
-      
-      // Calculate stats from loaded data
-      const calculatedStats = calculateStats(businessesData);
-      setStats(calculatedStats);
-    } catch (error) {
-      console.error('Failed to load initial data:', error);
-      showNotification('success', 'Loading Failed', 'Failed to load business data', 'Please check your database configuration.');
-      setTimeout(hideNotification, 3000);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const calculateStats = (data: Business[]) => {
-    const total = data.length;
-    const by_status: { [key: string]: number } = {};
-    const by_contact_status: { [key: string]: number } = {};
+  const handleRefresh = () => {
+    console.log('Manual refresh triggered');
+    // Manually trigger a refetch of all business-related queries
+    queryClient.invalidateQueries({ queryKey: ['businesses'] });
+    queryClient.invalidateQueries({ queryKey: QUERY_KEYS.BUSINESS_STATS });
     
-    data.forEach(business => {
-      by_status[business.status] = (by_status[business.status] || 0) + 1;
-      by_contact_status[business.contact_status] = (by_contact_status[business.contact_status] || 0) + 1;
-    });
-
-    const recent_count = data.filter(business => {
-      const createdDate = new Date(business.created_at);
-      const weekAgo = new Date();
-      weekAgo.setDate(weekAgo.getDate() - 7);
-      return createdDate > weekAgo;
-    }).length;
-
-    return { total, by_status, by_contact_status, recent_count };
+    // Force immediate refetch
+    queryClient.refetchQueries({ queryKey: ['businesses'] });
+    queryClient.refetchQueries({ queryKey: QUERY_KEYS.BUSINESS_STATS });
+    
+    showNotification('success', 'Refreshed', 'Business data updated', 'Business list and stats have been refreshed successfully.');
+    setTimeout(hideNotification, 2000);
   };
 
-  const loadBusinesses = async () => {
-    try {
-      const filters: any = {};
-      
-      if (searchTerm) filters.search = searchTerm;
-      if (statusFilter !== 'all') filters.status = statusFilter;
-      if (contactStatusFilter !== 'all') filters.contact_status = contactStatusFilter;
-      if (categoryFilter !== 'all') filters.category = categoryFilter;
-      if (locationFilter.area_id) filters.area_id = locationFilter.area_id;
-      if (ratingFilter !== 'all') filters.rating_min = parseFloat(ratingFilter);
-      if (contactFilter === 'has_phone') filters.has_phone = true;
-      if (contactFilter === 'has_website') filters.has_website = true;
-
-      const businessesData = await businessApi.getAll(filters);
-      setBusinesses(businessesData);
-      
-      // Recalculate stats with filtered data
-      const calculatedStats = calculateStats(businessesData);
-      setStats(calculatedStats);
-    } catch (error) {
-      console.error('Failed to load businesses:', error);
-    }
-  };
-
-  const handleRefresh = async () => {
-    setRefreshing(true);
-    try {
-      await loadBusinesses();
-      showNotification('success', 'Refreshed', 'Business data updated', 'Business list has been refreshed successfully.');
-      setTimeout(hideNotification, 2000);
-    } catch (error) {
-      console.error('Failed to refresh businesses:', error);
-      showNotification('success', 'Refresh Failed', 'Failed to refresh businesses', 'Please check your database configuration.');
-      setTimeout(hideNotification, 3000);
-    } finally {
-      setRefreshing(false);
-    }
-  };
-
-  const toggleRowExpansion = async (businessId: number) => {
+  const toggleRowExpansion = (businessId: number) => {
     const newExpandedRows = new Set(expandedRows);
     
     if (expandedRows.has(businessId)) {
       newExpandedRows.delete(businessId);
     } else {
       newExpandedRows.add(businessId);
-      
-      // Load interactions if not already loaded
-      if (!businessInteractions[businessId]) {
-        try {
-          const interactions = await businessInteractionApi.getByBusinessId(businessId);
-          setBusinessInteractions(prev => ({
-            ...prev,
-            [businessId]: interactions
-          }));
-        } catch (error) {
-          console.warn('Failed to load interactions:', error);
-          setBusinessInteractions(prev => ({
-            ...prev,
-            [businessId]: []
-          }));
-        }
-      }
     }
     
     setExpandedRows(newExpandedRows);
   };
 
+  // Use individual interaction hooks for expanded rows
+  const useInteractionsForBusiness = (businessId: number) => {
+    return useBusinessInteractions(businessId, expandedRows.has(businessId));
+  };
+
+  // Calculate total pages based on total businesses count
+  const totalPages = Math.ceil((globalStats.total || 0) / pageSize);
+
+  // Reset to page 1 when filters change
+  const handleFilterChange = (filterType: string, value: string) => {
+    setCurrentPage(1);
+    switch (filterType) {
+      case 'search':
+        setSearchTerm(value);
+        break;
+      case 'status':
+        setStatusFilter(value);
+        break;
+      case 'contact_status':
+        setContactStatusFilter(value);
+        break;
+      case 'category':
+        setCategoryFilter(value);
+        break;
+      case 'rating':
+        setRatingFilter(value);
+        break;
+      case 'contact':
+        setContactFilter(value);
+        break;
+    }
+  };
+
   const handleStatusChange = async (businessId: number, newStatus: Business['status']) => {
+    const business = businesses.find(b => b.id === businessId) || null;
+    setStatusModal({ open: true, business, newStatus, note: '', saving: false });
+  };
+
+  const submitStatusModal = async () => {
+    if (!statusModal.business || !statusModal.newStatus) return;
+    setStatusModal(prev => ({ ...prev, saving: true }));
     try {
-      await businessApi.updateStatus(businessId, newStatus);
-      loadBusinesses();
-      showNotification('success', 'Status Updated', 'Business status changed', `Status updated to ${newStatus}`);
+      await businessMutation.mutateAsync({
+        type: 'updateStatus',
+        id: statusModal.business.id,
+        payload: { status: statusModal.newStatus, notes: statusModal.note || undefined }
+      });
+      if (statusModal.note) {
+        await interactionMutation.mutateAsync({
+          type: 'addNote',
+          businessId: statusModal.business.id,
+          payload: { note: statusModal.note }
+        });
+      }
+      showNotification('success', 'Status Updated', 'Business status changed', `Status updated to ${statusModal.newStatus}`);
       setTimeout(hideNotification, 2000);
+      setStatusModal({ open: false, business: null, newStatus: null, note: '', saving: false });
     } catch (error) {
       console.error('Failed to update status:', error);
       showNotification('success', 'Update Failed', 'Failed to update status', 'Please try again.');
       setTimeout(hideNotification, 3000);
+      setStatusModal(prev => ({ ...prev, saving: false }));
+    }
+  };
+
+  const handleSaveNote = async (business: Business) => {
+    const draft = noteDrafts[business.id] ?? '';
+    setSavingNoteId(business.id);
+    try {
+      await businessMutation.mutateAsync({
+        type: 'updateField',
+        id: business.id,
+        payload: { field: 'notes', value: draft }
+      });
+      if (draft && draft.trim().length > 0) {
+        await interactionMutation.mutateAsync({
+          type: 'addNote',
+          businessId: business.id,
+          payload: { note: draft }
+        });
+      }
+      showNotification('success', 'Notes Saved', business.name, 'Notes have been updated.');
+      setTimeout(hideNotification, 1500);
+      setEditingNoteId(null);
+    } catch (error) {
+      console.error('Failed to save note:', error);
+      showNotification('success', 'Save Failed', 'Failed to save notes', 'Please try again.');
+      setTimeout(hideNotification, 2500);
+    } finally {
+      setSavingNoteId(null);
+    }
+  };
+
+  const handleSaveContact = async (business: Business) => {
+    const draft = contactDrafts[business.id] || { contact_status: business.contact_status, next_followup_at: business.next_followup_at };
+    setSavingContactId(business.id);
+    try {
+      await businessMutation.mutateAsync({
+        type: 'updateContactStatus',
+        id: business.id,
+        payload: { status: draft.contact_status, followupDate: draft.next_followup_at }
+      });
+      showNotification('success', 'Contact Updated', business.name, 'Contact status updated.');
+      setTimeout(hideNotification, 1500);
+    } catch (error) {
+      console.error('Failed to update contact status:', error);
+      showNotification('success', 'Update Failed', 'Failed to update contact status', 'Please try again.');
+      setTimeout(hideNotification, 2500);
+    } finally {
+      setSavingContactId(null);
+    }
+  };
+
+  const handleSaveAssignedMarketer = async (business: Business) => {
+    const value = assignedMarketerDrafts[business.id];
+    const marketerId = value === '' ? null : Number(value);
+    setSavingAssignedId(business.id);
+    try {
+      await businessMutation.mutateAsync({
+        type: 'updateField',
+        id: business.id,
+        payload: { field: 'assigned_marketer', value: marketerId }
+      });
+      showNotification('success', 'Assignment Updated', business.name, 'Assigned marketer updated.');
+      setTimeout(hideNotification, 1500);
+    } catch (error) {
+      console.error('Failed to update assigned marketer:', error);
+      showNotification('success', 'Update Failed', 'Failed to update assignment', 'Please try again.');
+      setTimeout(hideNotification, 2500);
+    } finally {
+      setSavingAssignedId(null);
     }
   };
 
   const handleExport = async () => {
     try {
-      const filters: any = {};
+      const filters: Record<string, unknown> = {};
       if (searchTerm) filters.search = searchTerm;
       if (statusFilter !== 'all') filters.status = statusFilter;
       if (contactStatusFilter !== 'all') filters.contact_status = contactStatusFilter;
@@ -234,14 +327,14 @@ export const BusinessesManagement: React.FC = () => {
   };
 
   // Get unique categories for filter
-  const uniqueCategories = useMemo(() => {
-    const categories = businesses
-      .map(b => b.category)
-      .filter(Boolean)
-      .filter((category, index, self) => self.indexOf(category) === index)
-      .sort();
-    return categories;
-  }, [businesses]);
+  // const uniqueCategories = useMemo(() => {
+  //   const categories = businesses
+  //     .map(b => b.category)
+  //     .filter(Boolean)
+  //     .filter((category, index, self) => self.indexOf(category) === index)
+  //     .sort();
+  //   return categories;
+  // }, [businesses]);
 
   // Filter options
   const statusOptions = [
@@ -264,33 +357,32 @@ export const BusinessesManagement: React.FC = () => {
 
   const categoryOptions = [
     { value: 'all', label: 'All Categories' },
-    ...uniqueCategories.map(cat => ({ value: cat!, label: cat! }))
+    { value: 'restaurant', label: 'Restaurant' },
+    { value: 'cafe', label: 'Cafe' },
+    { value: 'hotel', label: 'Hotel' },
   ];
-
   const ratingOptions = [
     { value: 'all', label: 'All Ratings' },
     { value: '4', label: '4+ Stars' },
     { value: '3', label: '3+ Stars' },
     { value: '2', label: '2+ Stars' },
-    { value: '1', label: '1+ Stars' }
+    { value: '1', label: '1+ Stars' },
   ];
-
   const contactOptions = [
     { value: 'all', label: 'All Contact Info' },
     { value: 'has_phone', label: 'Has Phone' },
     { value: 'has_website', label: 'Has Website' },
-    { value: 'complete', label: 'Complete Info' }
   ];
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'new': return '#86868b';
-      case 'contacted': return '#0071e3';
-      case 'interested': return '#ff9500';
-      case 'qualified': return '#34c759';
-      case 'closed': return '#34c759';
-      case 'rejected': return '#ff3b30';
-      default: return '#86868b';
+      case 'new': return '#6b7280';
+      case 'contacted': return '#3b82f6';
+      case 'interested': return '#f59e0b';
+      case 'qualified': return '#10b981';
+      case 'closed': return '#10b981';
+      case 'rejected': return '#ef4444';
+      default: return '#6b7280';
     }
   };
 
@@ -306,666 +398,681 @@ export const BusinessesManagement: React.FC = () => {
     }
   };
 
-  const columns = [
-    {
-      key: 'expand',
-      title: '',
-      width: '30px',
-      render: (_: unknown, record: Business) => (
-        <button
-          onClick={() => toggleRowExpansion(record.id)}
-          className="p-0.5 hover:bg-gray-100 rounded-full transition-colors duration-150"
-        >
-          {expandedRows.has(record.id) ? (
-            <ChevronDown className="w-3.5 h-3.5 text-[#6b7280]" />
-          ) : (
-            <ChevronRight className="w-3.5 h-3.5 text-[#6b7280]" />
-          )}
-        </button>
-      )
-    },
-    {
-      key: 'selection',
-      title: '',
-      width: '30px',
-      render: (_: unknown, record: Business) => (
-        <input
-          type="checkbox"
-          checked={selectedBusinesses.includes(record.id)}
-          onChange={(e) => {
-            if (e.target.checked) {
-              setSelectedBusinesses([...selectedBusinesses, record.id]);
-            } else {
-              setSelectedBusinesses(selectedBusinesses.filter(id => id !== record.id));
-            }
-          }}
-          className="w-3.5 h-3.5 text-[#0071e3] bg-white border-gray-300 rounded focus:ring-[#0071e3]/20"
-        />
-      )
-    },
-    {
-      key: 'name',
-      title: 'Business',
-      render: (_: unknown, record: Business) => (
-        <div className="py-0.5">
-          <div className="text-[13px] font-medium text-[#1d1d1f] tracking-[-0.015em] mb-0.5 line-clamp-1">
-            {record.name}
-          </div>
-          <div className="flex items-center gap-1 text-[11px] text-[#6b7280] tracking-[-0.01em]">
-            <MapPin className="w-2.5 h-2.5" />
-            <span className="line-clamp-1">{record.areas?.name}, {record.areas?.cities?.name}</span>
-          </div>
-          {record.category && (
-            <div className="inline-block bg-[rgba(0,113,227,0.08)] text-[#0071e3] px-1.5 py-0.5 rounded-md text-[10px] font-medium mt-1 line-clamp-1">
-              {record.category}
-            </div>
-          )}
-        </div>
-      )
-    },
-    {
-      key: 'contact_info',
-      title: 'Contact',
-      width: '140px',
-      render: (_: unknown, record: Business) => (
-        <div className="py-0.5 space-y-0.5">
-          {record.phone && (
-            <div className="flex items-center gap-1 text-[11px] text-[#374151] tracking-[-0.01em]">
-              <Phone className="w-2.5 h-2.5 text-[#6b7280]" />
-              <a href={`tel:${record.phone}`} className="hover:text-[#0071e3] truncate max-w-[110px]">
-                {record.phone}
-              </a>
-            </div>
-          )}
-          {record.website && (
-            <div className="flex items-center gap-1 text-[11px] text-[#374151] tracking-[-0.01em]">
-              <Globe className="w-2.5 h-2.5 text-[#6b7280]" />
-              <a href={record.website} target="_blank" rel="noopener noreferrer" className="hover:text-[#0071e3] truncate max-w-[110px]">
-                {record.website.replace(/^https?:\/\//, '').replace(/\/$/, '')}
-              </a>
-            </div>
-          )}
-          {!record.phone && !record.website && (
-            <span className="text-[11px] text-[#9ca3af] tracking-[-0.01em] italic">No contact info</span>
-          )}
-        </div>
-      )
-    },
-    {
-      key: 'rating',
-      title: 'Rating',
-      width: '70px',
-      render: (value: number, record: Business) => (
-        <div className="py-0.5">
-          {value ? (
-            <div className="flex flex-col">
-              <div className="flex items-center gap-0.5">
-                <Star className="w-3 h-3 text-[#fbbf24] fill-current" />
-                <span className="text-[12px] font-medium text-[#374151] tracking-[-0.015em]">
-                  {value.toFixed(1)}
-                </span>
-              </div>
-              {record.review_count ? (
-                <div className="text-[10px] text-[#9ca3af] tracking-[-0.01em]">
-                  {record.review_count} reviews
-                </div>
-              ) : null}
-            </div>
-          ) : (
-            <span className="text-[11px] text-[#9ca3af] tracking-[-0.01em] italic">No rating</span>
-          )}
-        </div>
-      )
-    },
-    {
-      key: 'status',
-      title: 'Status',
-      width: '90px',
-      render: (value: string) => (
-        <div className="py-0.5">
-          <div 
-            className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-medium"
-            style={{ 
-              color: getStatusColor(value),
-              backgroundColor: `${getStatusColor(value)}10`
-            }}
-          >
-            <span>{getStatusIcon(value)}</span>
-            <span className="capitalize">
-              {value.replace('_', ' ')}
-            </span>
-          </div>
-        </div>
-      )
-    },
-    {
-      key: 'last_contacted_at',
-      title: 'Last Contact',
-      width: '90px',
-      render: (value: string) => value ? (
-        <div className="flex items-center gap-1 text-[11px] text-[#6b7280] tracking-[-0.01em] py-0.5">
-          <Calendar className="w-2.5 h-2.5" />
-          <span>{new Date(value).toLocaleDateString()}</span>
-        </div>
-      ) : (
-        <span className="text-[11px] text-[#9ca3af] italic tracking-[-0.01em] py-0.5">Never</span>
-      )
-    },
-    {
-      key: 'actions',
-      title: '',
-      width: '40px',
-      render: (_: unknown, record: Business) => (
-        <div className="flex justify-center py-0.5">
-          <div className="relative group/menu">
-            <button className="p-1 hover:bg-gray-100 rounded-full transition-colors duration-150">
-              <MoreVertical className="w-3.5 h-3.5 text-[#6b7280]" />
-            </button>
-            <div className="absolute right-0 top-full mt-1 w-40 bg-white border border-gray-200 rounded-lg shadow-lg opacity-0 invisible group-hover/menu:opacity-100 group-hover/menu:visible transition-all duration-200 z-10">
-              <div className="py-1">
-                {statusOptions.slice(1).map(status => (
-                  <button
-                    key={status.value}
-                    onClick={() => handleStatusChange(record.id, status.value as Business['status'])}
-                    className="w-full text-left px-3 py-1.5 text-[11px] text-[#374151] hover:bg-gray-50 transition-colors duration-150"
-                  >
-                    <span className="inline-flex items-center gap-2">
-                      <span style={{ color: getStatusColor(status.value as string) }}>
-                        {getStatusIcon(status.value as string)}
-                      </span>
-                      <span>Mark as {status.label}</span>
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      )
-    }
-  ];
-
   return (
-    <div className="px-1 py-1">
-      <div className="bg-[rgba(255,255,255,0.75)] backdrop-blur-md rounded-xl border border-[rgba(0,0,0,0.06)] shadow-[0_2px_12px_rgba(0,0,0,0.06)] overflow-hidden">
-        <div className="flex justify-between items-center p-4 border-b border-[rgba(0,0,0,0.06)]">
-          <div>
-            <h3 className="text-[20px] font-semibold text-[#1e293b] tracking-[-0.025em] leading-[1.2]">
-              Business Data Management
-            </h3>
-            <p className="text-[13px] text-[#64748b] mt-0.5 tracking-[-0.01em]">
-              View and manage collected business information
-            </p>
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-100 p-4 md:p-6 lg:p-8">
+      <div className="max-w-[1600px] mx-auto space-y-6">
+        {/* Header */}
+        <div className="bg-white/70 backdrop-blur-xl rounded-3xl border border-white/20 shadow-2xl shadow-black/5 overflow-hidden">
+          <div className="bg-gradient-to-r from-primary-600 via-primary-700 to-primary-800 px-8 py-6">
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+              <div>
+                <div className="flex items-center gap-3 mb-2">
+                  <div className="p-2.5 bg-white/20 backdrop-blur-sm rounded-2xl">
+                    <Building className="w-7 h-7 text-white" />
+                  </div>
+                  <div>
+                    <h1 className="text-3xl font-bold text-white tracking-tight">
+                      Business Dashboard
+                    </h1>
+                    <p className="text-primary-100 text-sm font-medium mt-0.5">
+                      Manage leads, track interactions, and grow your business
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <Button
+                  variant="secondary"
+                  onClick={handleExport}
+                  icon={<Download className="w-4 h-4" />}
+                  className="bg-white/20 backdrop-blur-sm border-white/30 text-white hover:bg-white/30 transition-all duration-300"
+                >
+                  Export Data
+                </Button>
+                <Button
+                  variant="primary"
+                  onClick={handleRefresh}
+                  loading={isLoading || businessMutation.isPending}
+                  icon={<RefreshCw className="w-4 h-4" />}
+                  className="shadow-lg transition-all duration-300"
+                >
+                  Refresh
+                </Button>
+              </div>
+            </div>
           </div>
-          <div className="flex gap-1.5">
-            {selectedBusinesses.length > 0 && (
-              <Button
-                variant="secondary"
-                onClick={() => setIsBulkActionsModalOpen(true)}
-                icon={<CheckSquare className="w-3.5 h-3.5" />}
-                className="text-[12px] px-2.5 py-1.5"
-              >
-                Bulk ({selectedBusinesses.length})
-              </Button>
+
+          </div>
+
+          {/* Stats Cards */}
+          <div className="px-8 py-6 bg-white/50 backdrop-blur-sm">
+            {statsLoading || (globalStats.total === 0 && !statsError) ? (
+              <SkeletonStats />
+            ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="group relative overflow-hidden bg-gradient-to-br from-white to-gray-50/80 backdrop-blur-sm rounded-2xl border border-white/60 shadow-lg hover:shadow-xl transition-all duration-500 hover:-translate-y-1">
+                <div className="absolute inset-0 bg-gradient-to-br from-primary-500/5 via-transparent to-primary-600/10"></div>
+                <div className="relative p-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="p-3 bg-gradient-to-br from-primary-500 to-primary-600 rounded-2xl shadow-lg shadow-primary-500/25">
+                      <Building className="w-6 h-6 text-white" />
+                    </div>
+                    <div className="text-right">
+                      <div className="text-2xl font-bold text-gray-900 mb-0.5">
+                        {globalStats.total.toLocaleString()}
+                      </div>
+                      <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                        Total Businesses
+                      </div>
+                    </div>
+                  </div>
+                  <div className="w-full bg-gray-100 rounded-full h-1.5">
+                    <div className="bg-gradient-to-r from-primary-500 to-primary-600 h-1.5 rounded-full" style={{ width: '100%' }}></div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="group relative overflow-hidden bg-gradient-to-br from-white to-gray-50/80 backdrop-blur-sm rounded-2xl border border-white/60 shadow-lg hover:shadow-xl transition-all duration-500 hover:-translate-y-1">
+                <div className="absolute inset-0 bg-gradient-to-br from-success-500/5 via-transparent to-success-600/10"></div>
+                <div className="relative p-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="p-3 bg-gradient-to-br from-success-500 to-success-600 rounded-2xl shadow-lg shadow-success-500/25">
+                      <Target className="w-6 h-6 text-white" />
+                    </div>
+                    <div className="text-right">
+                      <div className="text-2xl font-bold text-gray-900 mb-0.5">
+                        {(globalStats.by_status?.qualified || 0) + (globalStats.by_status?.closed || 0)}
+                      </div>
+                      <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                        Qualified/Closed
+                      </div>
+                    </div>
+                  </div>
+                  <div className="w-full bg-gray-100 rounded-full h-1.5">
+                    <div className="bg-gradient-to-r from-success-500 to-success-600 h-1.5 rounded-full" style={{ width: `${globalStats.total ? Math.min(100, ((globalStats.by_status?.qualified || 0) + (globalStats.by_status?.closed || 0)) / globalStats.total * 100) : 0}%` }}></div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="group relative overflow-hidden bg-gradient-to-br from-white to-gray-50/80 backdrop-blur-sm rounded-2xl border border-white/60 shadow-lg hover:shadow-xl transition-all duration-500 hover:-translate-y-1">
+                <div className="absolute inset-0 bg-gradient-to-br from-blue-500/5 via-transparent to-blue-600/10"></div>
+                <div className="relative p-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="p-3 bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl shadow-lg shadow-blue-500/25">
+                      <Users className="w-6 h-6 text-white" />
+                    </div>
+                    <div className="text-right">
+                      <div className="text-2xl font-bold text-gray-900 mb-0.5">
+                        {globalStats.by_contact_status?.contacted || 0}
+                      </div>
+                      <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                        Contacted
+                      </div>
+                    </div>
+                  </div>
+                  <div className="w-full bg-gray-100 rounded-full h-1.5">
+                    <div className="bg-gradient-to-r from-blue-500 to-blue-600 h-1.5 rounded-full" style={{ width: `${globalStats.total ? Math.min(100, (globalStats.by_contact_status?.contacted || 0) / globalStats.total * 100) : 0}%` }}></div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="group relative overflow-hidden bg-gradient-to-br from-white to-gray-50/80 backdrop-blur-sm rounded-2xl border border-white/60 shadow-lg hover:shadow-xl transition-all duration-500 hover:-translate-y-1">
+                <div className="absolute inset-0 bg-gradient-to-br from-warning-500/5 via-transparent to-warning-600/10"></div>
+                <div className="relative p-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="p-3 bg-gradient-to-br from-warning-500 to-warning-600 rounded-2xl shadow-lg shadow-warning-500/25">
+                      <Activity className="w-6 h-6 text-white" />
+                    </div>
+                    <div className="text-right">
+                      <div className="text-2xl font-bold text-gray-900 mb-0.5">
+                        {globalStats.by_status?.new || 0}
+                      </div>
+                      <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                        New Leads
+                      </div>
+                    </div>
+                  </div>
+                  <div className="w-full bg-gray-100 rounded-full h-1.5">
+                    <div className="bg-gradient-to-r from-warning-500 to-warning-600 h-1.5 rounded-full" style={{ width: `${globalStats.total ? Math.min(100, (globalStats.by_status?.new || 0) / globalStats.total * 100) : 0}%` }}></div>
+                  </div>
+                </div>
+              </div>
+            </div>
             )}
-            <Button
-              variant="secondary"
-              onClick={handleExport}
-              icon={<Download className="w-3.5 h-3.5" />}
-              className="text-[12px] px-2.5 py-1.5"
-            >
-              Export
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={handleRefresh}
-              loading={refreshing}
-              icon={<RefreshCw className="w-3.5 h-3.5" />}
-              className="text-[12px] px-2.5 py-1.5"
-            >
-              Refresh
-            </Button>
           </div>
-        </div>
 
-        {/* Stats Cards */}
-        <div className="p-4 border-b border-[rgba(0,0,0,0.06)] bg-gradient-to-r from-[#f8fafc] to-white">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="bg-white rounded-lg shadow-sm border border-[rgba(0,0,0,0.04)] px-3 py-2.5 text-center">
-              <div className="text-[18px] font-semibold text-[#1e293b] tracking-[-0.02em]">
-                {stats.total.toLocaleString()}
+          {/* Filters Bar */}
+          <div className="px-8 pt-2 pb-6 bg-white/50 backdrop-blur-sm border-t border-white/40">
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+              <div className="md:col-span-2">
+                <Input
+                  placeholder="Search by name, address, category..."
+                  value={searchTerm}
+                  onChange={(e) => handleFilterChange('search', e.target.value)}
+                  icon={<Search className="w-4 h-4" />}
+                />
               </div>
-              <div className="text-[11px] text-[#64748b] tracking-[-0.01em] mt-0.5">Total Businesses</div>
-            </div>
-            <div className="bg-[#f0fdf4] rounded-lg shadow-sm border border-[rgba(22,163,74,0.1)] px-3 py-2.5 text-center">
-              <div className="text-[18px] font-semibold text-[#16a34a] tracking-[-0.02em]">
-                {(stats.by_status?.qualified || 0) + (stats.by_status?.closed || 0)}
-              </div>
-              <div className="text-[11px] text-[#15803d] tracking-[-0.01em] mt-0.5">Qualified/Closed</div>
-            </div>
-            <div className="bg-[#f0f9ff] rounded-lg shadow-sm border border-[rgba(2,132,199,0.1)] px-3 py-2.5 text-center">
-              <div className="text-[18px] font-semibold text-[#0284c7] tracking-[-0.02em]">
-                {stats.by_status?.contacted || 0}
-              </div>
-              <div className="text-[11px] text-[#0369a1] tracking-[-0.01em] mt-0.5">Contacted</div>
-            </div>
-            <div className="bg-[#f8fafc] rounded-lg shadow-sm border border-[rgba(100,116,139,0.1)] px-3 py-2.5 text-center">
-              <div className="text-[18px] font-semibold text-[#475569] tracking-[-0.02em]">
-                {stats.by_status?.new || 0}
-              </div>
-              <div className="text-[11px] text-[#64748b] tracking-[-0.01em] mt-0.5">New Leads</div>
-            </div>
-          </div>
-        </div>
-
-        {/* Filters */}
-        <div className="p-4 border-b border-[rgba(0,0,0,0.06)] bg-[#fafafa]">
-          <div className="flex flex-wrap gap-2 mb-2">
-            <div className="flex-grow md:max-w-xs">
-              <Input
-                placeholder="Search businesses..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                icon={<Search className="w-3.5 h-3.5" />}
-                className="text-[12px] py-2"
-              />
-            </div>
-            <div className="flex gap-1.5 flex-wrap">
               <Select
                 value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                options={statusOptions}
-                className="text-[12px] py-2 w-32"
+                onChange={(e) => handleFilterChange('status', e.target.value)}
+                options={[{ value: 'all', label: 'All Statuses' }, ...statusOptions.slice(1)]}
               />
               <Select
                 value={contactStatusFilter}
-                onChange={(e) => setContactStatusFilter(e.target.value)}
+                onChange={(e) => handleFilterChange('contact_status', e.target.value)}
                 options={contactStatusOptions}
-                className="text-[12px] py-2 w-40"
               />
               <Select
                 value={categoryFilter}
-                onChange={(e) => setCategoryFilter(e.target.value)}
+                onChange={(e) => handleFilterChange('category', e.target.value)}
                 options={categoryOptions}
-                className="text-[12px] py-2 w-40"
               />
-            </div>
-          </div>
-          
-          <div className="flex gap-1.5 items-center flex-wrap">
-            <div className="flex gap-1.5">
               <Select
                 value={ratingFilter}
-                onChange={(e) => setRatingFilter(e.target.value)}
+                onChange={(e) => handleFilterChange('rating', e.target.value)}
                 options={ratingOptions}
-                className="text-[12px] py-2 w-28"
               />
               <Select
                 value={contactFilter}
-                onChange={(e) => setContactFilter(e.target.value)}
+                onChange={(e) => handleFilterChange('contact', e.target.value)}
                 options={contactOptions}
-                className="text-[12px] py-2 w-32"
               />
-            </div>
-            <div className="flex-grow"></div>
-            <div className="inline-flex items-center gap-2 text-[11px] text-[#64748b] tracking-[-0.01em] px-3 py-1.5 bg-white rounded-full border border-[rgba(0,0,0,0.04)] shadow-sm">
-              <Filter className="w-3 h-3" />
-              <span className="font-medium">{businesses.length}</span> businesses found
             </div>
           </div>
         </div>
 
-        <div className="p-3">
-          <div className="bg-white rounded-xl border border-[rgba(0,0,0,0.06)] shadow-sm overflow-hidden">
-            {/* Table Header */}
-            <div className="bg-gradient-to-r from-[#f8fafc] to-white border-b border-[rgba(0,0,0,0.06)] px-3 py-2.5">
-              <div className="flex items-center">
+      {/* Business List */}
+      {isLoading ? (
+        <BusinessTableSkeleton rows={pageSize} />
+      ) : (
+      <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+        <div className="sticky top-0 z-10 bg-gray-50/80 backdrop-blur border-b border-gray-200 px-5 py-2">
+          <div className="flex items-center">
+            <div className="w-6 flex justify-center">
+              <div className="w-4 h-4"></div>
+            </div>
+            <div className="w-6 flex justify-center">
+              <input
+                type="checkbox"
+                checked={selectedBusinesses.length === businesses.length && businesses.length > 0}
+                onChange={(e) => {
+                  if (e.target.checked) {
+                    setSelectedBusinesses(businesses.map(b => b.id));
+                  } else {
+                    setSelectedBusinesses([]);
+                  }
+                }}
+                className="w-4 h-4 text-blue-600 bg-white border-gray-300 rounded focus:ring-blue-500/20"
+              />
+            </div>
+            <div className="flex-1 grid grid-cols-6 gap-4 text-[11px] font-semibold text-gray-500 uppercase tracking-[0.08em]">
+              <div className="col-span-2 pl-2">Business</div>
+              <div>Contact</div>
+              <div>Rating</div>
+              <div>Status</div>
+              <div>Last</div>
+            </div>
+            <div className="w-10 flex justify-center"></div>
+          </div>
+        </div>
+
+        <div className="divide-y divide-gray-100">
+          {businesses.map((business) => (
+            <div key={business.id} className="group">
+              {/* Main Row */}
+              <div 
+                className={`flex items-center px-5 py-2.5 cursor-pointer transition-colors ${selectedBusinesses.includes(business.id) ? 'bg-primary-50/60' : 'hover:bg-gray-50'}`}
+                onClick={() => toggleRowExpansion(business.id)}
+              >
+                {/* Expand Button */}
                 <div className="w-6 flex justify-center">
-                  <div className="w-3.5 h-3.5"></div>
+                  <div className={`p-1 rounded-full transition-colors ${expandedRows.has(business.id) ? 'bg-blue-100' : 'group-hover:bg-gray-100'}`}>
+                    {expandedRows.has(business.id) ? (
+                      <ChevronDown className="w-4 h-4 text-blue-600" />
+                    ) : (
+                      <ChevronRight className="w-4 h-4 text-gray-400" />
+                    )}
+                  </div>
                 </div>
-                <div className="w-6 flex justify-center">
+
+                {/* Checkbox */}
+                <div className="w-6 flex justify-center" onClick={(e) => e.stopPropagation()}>
                   <input
                     type="checkbox"
-                    checked={selectedBusinesses.length === businesses.length && businesses.length > 0}
+                    checked={selectedBusinesses.includes(business.id)}
                     onChange={(e) => {
                       if (e.target.checked) {
-                        setSelectedBusinesses(businesses.map(b => b.id));
+                        setSelectedBusinesses([...selectedBusinesses, business.id]);
                       } else {
-                        setSelectedBusinesses([]);
+                        setSelectedBusinesses(selectedBusinesses.filter(id => id !== business.id));
                       }
                     }}
-                    className="w-3.5 h-3.5 text-[#0071e3] bg-white border-gray-300 rounded focus:ring-[#0071e3]/10"
+                    className="w-4 h-4 text-blue-600 bg-white border-gray-300 rounded focus:ring-blue-500/20"
                   />
                 </div>
-                <div className="flex-1 grid grid-cols-6 gap-2 text-[10px] font-semibold text-[#64748b] uppercase tracking-[0.05em]">
-                  <div className="col-span-2 pl-1.5">Business</div>
-                  <div>Contact</div>
-                  <div>Rating</div>
-                  <div>Status</div>
-                  <div>Last Contact</div>
-                </div>
-                <div className="w-10 flex justify-center text-[10px] font-semibold text-[#64748b] uppercase tracking-[0.05em]">
-                  
-                </div>
-              </div>
-            </div>
 
-            {/* Table Body */}
-            <div className="divide-y divide-[rgba(0,0,0,0.04)]">
-              {businesses.map((business) => (
-                <div key={business.id}>
-                  {/* Main Row - Clickable */}
-                  <div 
-                    className="flex items-center px-3 py-2.5 hover:bg-[#f8fafc] cursor-pointer transition-all duration-200"
-                    onClick={() => toggleRowExpansion(business.id)}
-                  >
-                    {/* Expand Button */}
-                    <div className="w-6 flex justify-center">
-                      <div className={`p-0.5 rounded-full transition-colors duration-200 ${expandedRows.has(business.id) ? 'bg-[#e0f2fe]' : 'group-hover:bg-gray-100'}`}>
-                        {expandedRows.has(business.id) ? (
-                          <ChevronDown className="w-3 h-3 text-[#0284c7]" />
-                        ) : (
-                          <ChevronRight className="w-3 h-3 text-[#64748b]" />
+                {/* Business Info */}
+                <div className="flex-1 grid grid-cols-6 gap-4 items-center">
+                  {/* Name & Location */}
+                  <div className="col-span-2">
+                    <div className="text-[13px] font-semibold text-gray-900 leading-5 line-clamp-1">
+                      {business.name}
+                    </div>
+                    <div className="flex items-center gap-1 text-[11px] text-gray-500">
+                      <MapPin className="w-3 h-3" />
+                      <span className="line-clamp-1 max-w-[220px]">
+                        {business.areas?.name}, {business.areas?.cities?.name}
+                      </span>
+                    </div>
+                    {business.category && (
+                      <span className="inline-block bg-primary-50 text-primary-700 px-2 py-0.5 rounded-full text-[11px] font-medium mt-1">
+                        {business.category}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Contact */}
+                  <div className="text-[12px] text-gray-700">
+                    <div className="space-y-0.5">
+                      {business.phone && (
+                        <div className="flex items-center gap-1">
+                          <Phone className="w-3 h-3 text-gray-400" />
+                          <a 
+                            href={`tel:${business.phone}`} 
+                            className="hover:text-blue-600 truncate max-w-[120px]"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {business.phone}
+                          </a>
+                        </div>
+                      )}
+                      {business.website && (
+                        <div className="flex items-center gap-1">
+                          <Globe className="w-3 h-3 text-gray-400" />
+                          <a 
+                            href={business.website} 
+                            target="_blank" 
+                            rel="noopener noreferrer" 
+                            className="hover:text-blue-600 truncate max-w-[140px]"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {business.website.replace(/^https?:\/\//, '').replace(/\/$/, '')}
+                          </a>
+                        </div>
+                      )}
+                      {!business.phone && !business.website && (
+                        <span className="text-[11px] text-gray-400 italic">No contact info</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Rating */}
+                  <div className="text-[12px]">
+                    {business.rating ? (
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-gray-900">{business.rating.toFixed(1)}</span>
+                        <div className="flex -mx-[1px]">
+                          {[1,2,3,4,5].map(i => (
+                            <Star key={i} className={`${(business.rating || 0) >= i ? 'text-yellow-500 fill-current' : 'text-gray-300'} w-3 h-3 mx-[1px]`} />
+                          ))}
+                        </div>
+                        {business.review_count && (
+                          <span className="text-[11px] text-gray-400">{business.review_count}</span>
                         )}
                       </div>
-                    </div>
+                    ) : (
+                      <span className="text-[11px] text-gray-400 italic">—</span>
+                    )}
+                  </div>
 
-                    {/* Checkbox */}
-                    <div className="w-6 flex justify-center" onClick={(e) => e.stopPropagation()}>
-                      <input
-                        type="checkbox"
-                        checked={selectedBusinesses.includes(business.id)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setSelectedBusinesses([...selectedBusinesses, business.id]);
-                          } else {
-                            setSelectedBusinesses(selectedBusinesses.filter(id => id !== business.id));
-                          }
-                        }}
-                        className="w-3.5 h-3.5 text-[#0071e3] bg-white border-gray-300 rounded focus:ring-[#0071e3]/10"
-                      />
-                    </div>
+                  {/* Status */}
+                  <div>
+                    <span 
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border"
+                      style={{ 
+                        color: getStatusColor(business.status),
+                        backgroundColor: `${getStatusColor(business.status)}0d`,
+                        borderColor: `${getStatusColor(business.status)}66`
+                      }}
+                    >
+                      <span>{getStatusIcon(business.status)}</span>
+                      <span className="capitalize">{business.status.replace('_', ' ')}</span>
+                    </span>
+                  </div>
 
-                    {/* Business Info */}
-                    <div className="flex-1 grid grid-cols-6 gap-2 items-center">
-                      {/* Name & Location */}
-                      <div className="col-span-2">
-                        <div className="text-[12px] font-medium text-[#1e293b] tracking-[-0.01em] leading-tight mb-0.5 line-clamp-1">
-                          {business.name}
-                        </div>
-                        <div className="flex items-center gap-1 text-[10px] text-[#64748b] tracking-[-0.01em]">
-                          <MapPin className="w-2.5 h-2.5" />
-                          <span className="line-clamp-1 max-w-[180px]">{business.areas?.name}, {business.areas?.cities?.name}</span>
-                        </div>
-                        {business.category && (
-                          <div className="inline-block bg-[#f0f9ff] text-[#0284c7] px-1.5 py-0.5 rounded-md text-[9px] font-medium mt-0.5">
-                            {business.category}
-                          </div>
-                        )}
+                  {/* Last Contact */}
+                  <div>
+                    {business.last_contacted_at ? (
+                      <div className="flex items-center gap-1 text-[11px] text-gray-500">
+                        <Calendar className="w-3 h-3" />
+                        <span>{new Date(business.last_contacted_at).toLocaleDateString()}</span>
                       </div>
+                    ) : (
+                      <span className="text-[11px] text-gray-400 italic">Never</span>
+                    )}
+                  </div>
 
-                      {/* Contact */}
-                      <div>
-                        <div className="space-y-0.5">
-                          {business.phone && (
-                            <div className="flex items-center gap-1 text-[10px] text-[#334155] tracking-[-0.01em]">
-                              <Phone className="w-2.5 h-2.5 text-[#64748b]" />
-                              <a 
-                                href={`tel:${business.phone}`} 
-                                className="hover:text-[#0284c7] truncate max-w-[80px] transition-colors duration-200"
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                {business.phone}
-                              </a>
-                            </div>
-                          )}
-                          {business.website && (
-                            <div className="flex items-center gap-1 text-[10px] text-[#334155] tracking-[-0.01em]">
-                              <Globe className="w-2.5 h-2.5 text-[#64748b]" />
-                              <a 
-                                href={business.website} 
-                                target="_blank" 
-                                rel="noopener noreferrer" 
-                                className="hover:text-[#0284c7] truncate max-w-[80px] transition-colors duration-200"
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                {business.website.replace(/^https?:\/\//, '').replace(/\/$/, '')}
-                              </a>
-                            </div>
-                          )}
-                          {!business.phone && !business.website && (
-                            <span className="text-[10px] text-[#94a3b8] tracking-[-0.01em] italic">No contact</span>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Rating */}
-                      <div>
-                        {business.rating ? (
-                          <div>
-                            <div className="flex items-center gap-0.5">
-                              <Star className="w-2.5 h-2.5 text-[#f59e0b] fill-current" />
-                              <span className="text-[11px] font-medium text-[#334155] tracking-[-0.01em]">
-                                {business.rating.toFixed(1)}
+                  {/* Actions */}
+                  <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
+                    <div className="group/actions relative">
+                      <button className="p-1 hover:bg-gray-100 rounded-full transition-colors">
+                        <MoreVertical className="w-4 h-4 text-gray-400" />
+                      </button>
+                       <div className="absolute right-0 top-full mt-1 w-48 bg-white border border-gray-200 rounded-xl shadow-xl opacity-0 invisible group-hover/actions:opacity-100 group-hover/actions:visible transition-all duration-200 z-30">
+                        <div className="py-2">
+                          {statusOptions.slice(1).map(status => (
+                            <button
+                              key={status.value}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleStatusChange(business.id, status.value as Business['status']);
+                              }}
+                              className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                            >
+                              <span className="inline-flex items-center gap-2">
+                                <span style={{ color: getStatusColor(status.value as string) }}>
+                                  {getStatusIcon(status.value as string)}
+                                </span>
+                                <span>Mark as {status.label}</span>
                               </span>
-                            </div>
-                            {business.review_count && (
-                              <div className="text-[9px] text-[#94a3b8] tracking-[-0.01em]">
-                                {business.review_count} reviews
-                              </div>
-                            )}
-                          </div>
-                        ) : (
-                          <span className="text-[10px] text-[#94a3b8] tracking-[-0.01em] italic">No rating</span>
-                        )}
-                      </div>
-
-                      {/* Status */}
-                      <div>
-                        <div 
-                          className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[9px] font-medium"
-                          style={{ 
-                            color: getStatusColor(business.status),
-                            backgroundColor: `${getStatusColor(business.status)}10`
-                          }}
-                        >
-                          <span>{getStatusIcon(business.status)}</span>
-                          <span className="capitalize">
-                            {business.status.replace('_', ' ')}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Last Contact */}
-                      <div>
-                        {business.last_contacted_at ? (
-                          <div className="flex items-center gap-1 text-[10px] text-[#64748b] tracking-[-0.01em]">
-                            <Calendar className="w-2.5 h-2.5" />
-                            <span>{new Date(business.last_contacted_at).toLocaleDateString()}</span>
-                          </div>
-                        ) : (
-                          <span className="text-[10px] text-[#94a3b8] tracking-[-0.01em] italic">Never</span>
-                        )}
-                      </div>
-
-                      {/* Actions */}
-                      <div className="flex justify-end" onClick={(e) => e.stopPropagation()}>
-                        <div className="group/actions relative">
-                          <button className="p-0.5 hover:bg-gray-100 rounded-full transition-colors duration-200">
-                            <MoreVertical className="w-3.5 h-3.5 text-[#64748b]" />
-                          </button>
-                          <div className="absolute right-0 top-full mt-1 w-40 bg-white border border-[rgba(0,0,0,0.08)] rounded-lg shadow-lg opacity-0 invisible group-hover/actions:opacity-100 group-hover/actions:visible transition-all duration-200 z-30">
-                            <div className="py-1">
-                              {statusOptions.slice(1).map(status => (
-                                <button
-                                  key={status.value}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleStatusChange(business.id, status.value as Business['status']);
-                                  }}
-                                  className="w-full text-left px-3 py-1.5 text-[11px] text-[#334155] hover:bg-[#f1f5f9] transition-colors duration-150"
-                                >
-                                  <span className="inline-flex items-center gap-1.5">
-                                    <span style={{ color: getStatusColor(status.value as string) }}>
-                                      {getStatusIcon(status.value as string)}
-                                    </span>
-                                    <span>Mark as {status.label}</span>
-                                  </span>
-                                </button>
-                              ))}
-                            </div>
-                          </div>
+                            </button>
+                          ))}
+                           <div className="my-1 border-t border-gray-100" />
+                           <button
+                             onClick={(e) => {
+                               e.stopPropagation();
+                               setEditingNoteId(business.id);
+                               setNoteDrafts(prev => ({ ...prev, [business.id]: business.notes || '' }));
+                             }}
+                             className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                           >
+                             Edit Notes
+                           </button>
                         </div>
                       </div>
                     </div>
                   </div>
+                </div>
+              </div>
 
-                  {/* Expanded Row */}
-                  {expandedRows.has(business.id) && (
-                    <div className="bg-gradient-to-r from-[#f8fafc] to-[#f1f5f9] border-t border-b border-[rgba(0,0,0,0.04)]">
-                      <div className="px-5 py-4">
-                        <div className="ml-16 grid grid-cols-1 md:grid-cols-3 gap-6">
-                          {/* Details */}
-                          <div className="bg-white rounded-lg shadow-sm border border-[rgba(0,0,0,0.04)] p-3.5">
-                            <h4 className="text-[11px] font-semibold text-[#334155] tracking-[-0.015em] mb-3 flex items-center gap-2">
-                              <div className="w-1 h-3.5 bg-[#0284c7] rounded-full"></div>
-                              Business Details
-                            </h4>
-                            <div className="space-y-3 pl-3">
-                              {business.address && (
-                                <div>
-                                  <div className="text-[10px] font-medium text-[#64748b] uppercase tracking-[0.05em] mb-1">Address</div>
-                                  <div className="text-[11px] text-[#334155] leading-relaxed">{business.address}</div>
-                                </div>
-                              )}
-                              {business.scrape_jobs?.keyword && (
-                                <div>
-                                  <div className="text-[10px] font-medium text-[#64748b] uppercase tracking-[0.05em] mb-1">Keyword</div>
-                                  <div className="inline-block bg-[#e0f2fe] text-[#0284c7] px-2 py-1 rounded-md text-[10px] font-medium">
-                                    {business.scrape_jobs.keyword}
-                                  </div>
-                                </div>
-                              )}
-                              <div>
-                                <div className="text-[10px] font-medium text-[#64748b] uppercase tracking-[0.05em] mb-1">Added</div>
-                                <div className="text-[11px] text-[#334155]">
-                                  {new Date(business.created_at).toLocaleDateString()}
-                                </div>
-                              </div>
+              {/* Expanded Row */}
+              {expandedRows.has(business.id) && (
+                <div className="bg-gray-50">
+                  <div className="px-5 py-3">
+                    <div className="ml-12 grid grid-cols-1 md:grid-cols-3 gap-4 text-[12px] text-gray-700">
+                      {/* Details */}
+                      <div className="border border-gray-200 rounded-lg bg-white p-3">
+                        <div className="text-[11px] uppercase tracking-[0.06em] text-gray-500 mb-2">Details</div>
+                        {business.address && (
+                          <div className="mb-2">
+                            <div className="text-[11px] text-gray-500">Address</div>
+                            <div className="text-gray-900">{business.address}</div>
+                          </div>
+                        )}
+                        {(business.latitude !== undefined && business.longitude !== undefined) && (
+                          <div className="mb-2">
+                            <div className="text-[11px] text-gray-500">Coordinates</div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-gray-900">{business.latitude}, {business.longitude}</span>
+                              <a
+                                href={`https://www.google.com/maps?q=${business.latitude},${business.longitude}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-blue-600 hover:underline"
+                              >
+                                Open map
+                              </a>
                             </div>
                           </div>
-
-                          {/* Contact Status */}
-                          <div className="bg-white rounded-lg shadow-sm border border-[rgba(0,0,0,0.04)] p-3.5">
-                            <h4 className="text-[11px] font-semibold text-[#334155] tracking-[-0.015em] mb-3 flex items-center gap-2">
-                              <div className="w-1 h-3.5 bg-[#10b981] rounded-full"></div>
-                              Contact Status
-                            </h4>
-                            <div className="space-y-3 pl-3">
-                              <div>
-                                <div className="text-[10px] font-medium text-[#64748b] uppercase tracking-[0.05em] mb-1">Status</div>
-                                <div className="text-[11px] text-[#334155] capitalize font-medium">
-                                  <span 
-                                    className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px]"
-                                    style={{ 
-                                      color: getStatusColor(business.status),
-                                      backgroundColor: `${getStatusColor(business.status)}10`
-                                    }}
-                                  >
-                                    {business.contact_status.replace('_', ' ')}
-                                  </span>
-                                </div>
-                              </div>
-                              {business.next_followup_at && (
-                                <div>
-                                  <div className="text-[10px] font-medium text-[#64748b] uppercase tracking-[0.05em] mb-1">Next Follow-up</div>
-                                  <div className="text-[11px] text-[#f59e0b] font-medium flex items-center gap-1">
-                                    <Clock className="w-3 h-3" />
-                                    {new Date(business.next_followup_at).toLocaleDateString()}
-                                  </div>
-                                </div>
-                              )}
+                        )}
+                        {business.scrape_jobs?.keyword && (
+                          <div>
+                            <div className="text-[11px] text-gray-500">Keyword</div>
+                            <div className="inline-block bg-blue-50 text-blue-700 px-2 py-0.5 rounded-md text-[11px] font-medium">
+                              {business.scrape_jobs.keyword}
                             </div>
                           </div>
-
-                          {/* Notes & Activity */}
-                          <div className="bg-white rounded-lg shadow-sm border border-[rgba(0,0,0,0.04)] p-3.5">
-                            <h4 className="text-[11px] font-semibold text-[#334155] tracking-[-0.015em] mb-3 flex items-center gap-2">
-                              <div className="w-1 h-3.5 bg-[#8b5cf6] rounded-full"></div>
-                              Notes & Activity
-                            </h4>
-                            <div className="pl-3">
-                              {business.notes && (
-                                <div className="mb-3">
-                                  <div className="text-[10px] font-medium text-[#64748b] uppercase tracking-[0.05em] mb-1">Notes</div>
-                                  <div className="text-[11px] text-[#334155] bg-[#f8fafc] p-2.5 rounded-lg border border-[rgba(0,0,0,0.04)] leading-relaxed">
-                                    {business.notes}
-                                  </div>
-                                </div>
-                              )}
-                              
-                              {businessInteractions[business.id] && businessInteractions[business.id].length > 0 && (
-                                <div>
-                                  <div className="text-[10px] font-medium text-[#64748b] uppercase tracking-[0.05em] mb-1.5">Recent Activity</div>
-                                  <div className="divide-y divide-[rgba(0,0,0,0.04)]">
-                                    {businessInteractions[business.id].slice(0, 3).map(interaction => (
-                                      <div key={interaction.id} className="text-[10px] text-[#334155] flex items-center justify-between py-1.5">
-                                        <span className="capitalize font-medium flex items-center gap-1">
-                                          <Mail className="w-2.5 h-2.5 text-[#8b5cf6]" />
-                                          {interaction.action.replace('_', ' ')}
-                                        </span>
-                                        <span className="text-[#64748b]">
-                                          {new Date(interaction.timestamp).toLocaleDateString()}
-                                        </span>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
-                              
-                              {!business.notes && (!businessInteractions[business.id] || businessInteractions[business.id].length === 0) && (
-                                <div className="text-[11px] text-[#94a3b8] italic flex items-center justify-center h-20">
-                                  No notes or activity yet
-                                </div>
-                              )}
-                            </div>
+                        )}
+                        <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] text-gray-500">
+                          <div>
+                            <div>Created</div>
+                            <div className="text-gray-900 text-[12px]">{new Date(business.created_at).toLocaleString()}</div>
+                          </div>
+                          <div>
+                            <div>Updated</div>
+                            <div className="text-gray-900 text-[12px]">{new Date(business.updated_at).toLocaleString()}</div>
+                          </div>
+                        </div>
+                        <div className="mt-3">
+                          <div className="text-[11px] text-gray-500">Assigned Marketer (ID)</div>
+                          <div className="flex items-center gap-2 mt-1">
+                            <input
+                              type="number"
+                              className="w-28 px-3 py-1.5 border border-gray-200 rounded-md text-[12px]"
+                              value={assignedMarketerDrafts[business.id] ?? (business.assigned_marketer?.toString() ?? '')}
+                              onChange={(e) => setAssignedMarketerDrafts(prev => ({ ...prev, [business.id]: e.target.value }))}
+                            />
+                            <Button
+                              variant="secondary"
+                              loading={savingAssignedId === business.id}
+                              onClick={() => handleSaveAssignedMarketer(business)}
+                              className="!px-3 !py-1.5 text-[12px]"
+                            >
+                              Save
+                            </Button>
                           </div>
                         </div>
                       </div>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
 
-            {businesses.length === 0 && !loading && (
-              <div className="text-center py-10 px-4">
-                <div className="bg-[#f8fafc] rounded-full p-3 w-16 h-16 mx-auto mb-3">
-                  <Building className="w-10 h-10 text-[#94a3b8] opacity-60" />
+                      {/* Contact Status */}
+                      <div className="border border-gray-200 rounded-lg bg-white p-3">
+                        <div className="text-[11px] uppercase tracking-[0.06em] text-gray-500 mb-2">Contact Status</div>
+                        <div className="flex items-center gap-2">
+                          <span 
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border"
+                            style={{ 
+                              color: getStatusColor(business.status),
+                              backgroundColor: `${getStatusColor(business.status)}0d`,
+                              borderColor: `${getStatusColor(business.status)}66`
+                            }}
+                          >
+                            {business.contact_status.replace('_', ' ')}
+                          </span>
+                          {business.next_followup_at && (
+                            <span className="flex items-center gap-1 text-[11px] text-orange-600">
+                              <Clock className="w-3 h-3" />
+                              {new Date(business.next_followup_at).toLocaleDateString()}
+                            </span>
+                          )}
+                        </div>
+                        <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
+                          <select
+                            className="px-3 py-2 border border-gray-200 rounded-md text-[12px]"
+                            value={(contactDrafts[business.id]?.contact_status) ?? business.contact_status}
+                            onChange={(e) => setContactDrafts(prev => ({
+                              ...prev,
+                              [business.id]: {
+                                contact_status: e.target.value,
+                                next_followup_at: prev[business.id]?.next_followup_at ?? business.next_followup_at
+                              }
+                            }))}
+                          >
+                            {contactStatusOptions.slice(1).map(opt => (
+                              <option key={opt.value} value={opt.value}>{opt.label}</option>
+                            ))}
+                          </select>
+                          <input
+                            type="date"
+                            className="px-3 py-2 border border-gray-200 rounded-md text-[12px]"
+                            value={(contactDrafts[business.id]?.next_followup_at || business.next_followup_at || '').slice(0,10)}
+                            onChange={(e) => setContactDrafts(prev => ({
+                              ...prev,
+                              [business.id]: {
+                                contact_status: prev[business.id]?.contact_status ?? business.contact_status,
+                                next_followup_at: e.target.value ? new Date(e.target.value).toISOString() : undefined
+                              }
+                            }))}
+                          />
+                          <div className="flex items-center">
+                            <Button
+                              variant="secondary"
+                              loading={savingContactId === business.id}
+                              onClick={() => handleSaveContact(business)}
+                              className="w-full !py-2 text-[12px]"
+                            >
+                              Save
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Notes */}
+                      <div className="border border-gray-200 rounded-lg bg-white p-3">
+                        <div className="text-[11px] uppercase tracking-[0.06em] text-gray-500 mb-2">Notes</div>
+                        <div className="text-gray-900 leading-relaxed whitespace-pre-wrap">
+                          {editingNoteId === business.id ? (
+                            <>
+                              <textarea
+                                className="w-full min-h-[96px] px-3 py-2 border border-gray-200 rounded-md text-[13px]"
+                                value={noteDrafts[business.id] ?? business.notes ?? ''}
+                                onChange={(e) => setNoteDrafts(prev => ({ ...prev, [business.id]: e.target.value }))}
+                              />
+                              <div className="mt-2 flex items-center gap-2">
+                                <Button
+                                  variant="primary"
+                                  loading={savingNoteId === business.id}
+                                  onClick={() => handleSaveNote(business)}
+                                  className="!px-4 !py-2 text-[12px]"
+                                >
+                                  Save
+                                </Button>
+                                <Button
+                                  variant="secondary"
+                                  onClick={() => setEditingNoteId(null)}
+                                  className="!px-4 !py-2 text-[12px]"
+                                >
+                                  Cancel
+                                </Button>
+                              </div>
+                            </>
+                          ) : (
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex-1">
+                                {business.notes ? business.notes : <span className="text-gray-400 italic">No notes yet</span>}
+                              </div>
+                              <Button
+                                variant="secondary"
+                                onClick={() => {
+                                  setEditingNoteId(business.id);
+                                  setNoteDrafts(prev => ({ ...prev, [business.id]: business.notes || '' }));
+                                }}
+                                className="!px-3 !py-1.5 text-[12px]"
+                              >
+                                Edit
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
-                <div className="text-[13px] font-medium text-[#475569] tracking-[-0.01em]">No businesses found</div>
-                <div className="text-[11px] text-[#94a3b8] mt-1">Try adjusting your filters or search criteria</div>
-                <button 
-                  onClick={handleRefresh} 
-                  className="mt-4 text-[11px] font-medium text-[#0284c7] bg-[#f0f9ff] hover:bg-[#e0f2fe] px-3 py-1.5 rounded-full transition-colors duration-200 inline-flex items-center gap-1.5"
-                >
-                  <RefreshCw className="w-3 h-3" />
-                  Refresh data
-                </button>
-              </div>
-            )}
-            
-            {loading && (
-              <div className="text-center py-10 px-4">
-                <div className="inline-block p-3">
-                  <div className="w-8 h-8 border-2 border-[#e2e8f0] border-t-[#0284c7] rounded-full animate-spin"></div>
-                </div>
-                <div className="text-[13px] text-[#475569] tracking-[-0.01em] mt-2">Loading businesses...</div>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          ))}
+
+          {selectedBusinesses.length > 0 && (
+            <div className="sticky bottom-0 bg-white border-t border-gray-200 px-5 py-2.5 flex items-center justify-between">
+              <div className="text-sm font-medium text-gray-800">{selectedBusinesses.length} selected</div>
+              <button onClick={() => setSelectedBusinesses([])} className="text-sm text-primary-700 hover:underline">Clear selection</button>
+            </div>
+          )}
         </div>
+
+        {businesses.length === 0 && !isLoading && (
+          <div className="text-center py-16 px-4">
+            <div className="bg-gray-100 rounded-full p-4 w-16 h-16 mx-auto mb-4">
+              <Building className="w-10 h-10 text-gray-400" />
+            </div>
+            <div className="text-lg font-medium text-gray-900 mb-2">No businesses found</div>
+            <div className="text-sm text-gray-500 mb-6">Try adjusting your filters or search criteria</div>
+            <button 
+              onClick={handleRefresh} 
+              className="text-sm font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 px-4 py-2 rounded-lg transition-colors duration-200 inline-flex items-center gap-2"
+            >
+              <RefreshCw className="w-4 h-4" />
+              Refresh data
+            </button>
+          </div>
+        )}
+        
+        {isLoading && (
+          <div className="text-center py-16 px-4">
+            <div className="inline-block p-4">
+              <div className="w-8 h-8 border-2 border-gray-200 border-t-blue-600 rounded-full animate-spin"></div>
+            </div>
+            <div className="text-lg text-gray-900 mt-4">Loading businesses...</div>
+          </div>
+        )}
+
+        {/* Pagination */}
+        <Pagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          onPageChange={setCurrentPage}
+          disabled={isLoading || businessMutation.isPending}
+        />
       </div>
-    </div>
+      )}
+        {/* Status update modal */}
+        <Modal
+          isOpen={statusModal.open}
+          onClose={() => setStatusModal({ open: false, business: null, newStatus: null, note: '', saving: false })}
+          title={statusModal.business ? `Update Status • ${statusModal.business.name}` : 'Update Status'}
+          footer={(
+            <>
+              <Button
+                variant="secondary"
+                onClick={() => setStatusModal({ open: false, business: null, newStatus: null, note: '', saving: false })}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                loading={statusModal.saving}
+                onClick={submitStatusModal}
+                disabled={!statusModal.newStatus}
+              >
+                Save
+              </Button>
+            </>
+          )}
+          size="sm"
+        >
+          <div className="space-y-4">
+            <div>
+              <label className="block mb-1 text-[12px] text-gray-600">Status</label>
+              <select
+                className="w-full px-3 py-2 border border-gray-200 rounded-md text-[14px]"
+                value={statusModal.newStatus || statusModal.business?.status || ''}
+                onChange={(e) => setStatusModal(prev => ({ ...prev, newStatus: e.target.value as Business['status'] }))}
+              >
+                {statusOptions.slice(1).map(opt => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block mb-1 text-[12px] text-gray-600">Optional note</label>
+              <textarea
+                className="w-full min-h-[96px] px-3 py-2 border border-gray-200 rounded-md text-[14px]"
+                placeholder="Add a note (optional)"
+                value={statusModal.note}
+                onChange={(e) => setStatusModal(prev => ({ ...prev, note: e.target.value }))}
+              />
+            </div>
+          </div>
+        </Modal>
+      </div>
   );
 };

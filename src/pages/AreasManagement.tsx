@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Edit2, Trash2 } from 'lucide-react';
+import { Plus, Edit2, Trash2, MapPin, Building2, Target, Calendar } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { DataTable } from '../components/tables/DataTable';
 import { Button } from '../components/common/Button';
@@ -132,53 +132,78 @@ export const AreasManagement: React.FC = () => {
       key: 'id',
       title: 'ID',
       width: '80px',
-      render: (value: number) => <strong>{value}</strong>
+      render: (value: number) => <strong className="text-gray-900">{value}</strong>
     },
     {
       key: 'name',
-      title: 'Name'
+      title: 'Name',
+      render: (value: string) => (
+        <div className="font-semibold text-gray-900">{value}</div>
+      )
     },
     {
       key: 'cities',
       title: 'City',
-      render: (value: any) => value?.name || 'Unknown'
+      render: (value: any) => (
+        <div className="flex items-center gap-2">
+          <Building2 className="w-4 h-4 text-gray-400" />
+          <span className="text-gray-700">{value?.name || 'Unknown'}</span>
+        </div>
+      )
     },
     {
       key: 'cities',
       title: 'Country',
-      render: (value: any) => value?.countries?.name || 'Unknown'
+      render: (value: any) => (
+        <div className="flex items-center gap-2">
+          <MapPin className="w-4 h-4 text-gray-400" />
+          <span className="text-gray-700">{value?.countries?.name || 'Unknown'}</span>
+        </div>
+      )
     },
     {
       key: 'last_scraped_at',
       title: 'Last Scraped',
-      render: (value: string) => value ? 
-        new Date(value).toLocaleDateString() : 
-        <span className="text-[#86868b]">Never</span>
+      render: (value: string) => value ? (
+        <div className="flex items-center gap-2 text-green-600">
+          <Calendar className="w-4 h-4" />
+          <span className="text-sm font-medium">{new Date(value).toLocaleDateString()}</span>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2 text-gray-400">
+          <div className="w-2 h-2 bg-gray-400 rounded-full"></div>
+          <span className="text-sm">Never</span>
+        </div>
+      )
     },
     {
       key: 'created_at',
       title: 'Created',
-      render: (value: string) => new Date(value).toLocaleDateString()
+      render: (value: string) => (
+        <div className="text-sm text-gray-600">
+          {new Date(value).toLocaleDateString()}
+        </div>
+      )
     },
     {
       key: 'actions',
       title: 'Actions',
-      width: '160px',
+      width: '180px',
       render: (_: any, record: Area) => (
         <div className="flex gap-2">
           <Button
             variant="secondary"
             onClick={() => handleEdit(record)}
-            className="px-3 py-1.5 text-xs"
-            icon={<Edit2 className="w-3 h-3" />}
+            className="px-3 py-2 text-sm"
+            icon={<Edit2 className="w-4 h-4" />}
           >
             Edit
           </Button>
           <Button
             variant="danger"
             onClick={() => handleDelete(record)}
-            className="px-3 py-1.5 text-xs"
-            icon={<Trash2 className="w-3 h-3" />}
+            className="px-3 py-2 text-sm"
+            icon={<Trash2 className="w-4 h-4" />}
           >
             Delete
           </Button>
@@ -188,77 +213,107 @@ export const AreasManagement: React.FC = () => {
   ];
 
   return (
-    <div>
-      <div className="bg-[rgba(255,255,255,0.72)] backdrop-blur-md rounded-2xl border border-[rgba(0,0,0,0.08)] shadow-[0_2px_15px_rgba(0,0,0,0.08)] overflow-hidden">
-        <div className="flex justify-between items-center p-7 border-b border-[rgba(0,0,0,0.08)]">
-          <h3 className="text-xl font-semibold text-[#1d1d1f] tracking-[-0.025em]">
-            Areas Database Management
-          </h3>
-          <Button
-            variant="primary"
-            onClick={handleAdd}
-            icon={<Plus className="w-4 h-4" />}
-          >
-            Add Area
-          </Button>
+    <div className="space-y-6">
+      {/* Enhanced Header */}
+      <div className="bg-gradient-to-r from-white to-gray-50/50 backdrop-blur-xl rounded-3xl border border-gray-200/60 shadow-lg overflow-hidden">
+        <div className="p-8 border-b border-gray-200/60 bg-gradient-to-r from-blue-50/30 to-purple-50/30">
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+            <div>
+              <h1 className="text-3xl font-bold text-gray-900 tracking-tight mb-2">
+                Areas Database Management
+              </h1>
+              <p className="text-lg text-gray-600">
+                Manage business areas and their scraping status for lead generation
+              </p>
+            </div>
+            <Button
+              variant="primary"
+              onClick={handleAdd}
+              icon={<Plus className="w-4 h-4" />}
+              className="px-6 py-3"
+            >
+              Add Area
+            </Button>
+          </div>
         </div>
 
-        <div className="p-8">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+        {/* Enhanced Filters */}
+        <div className="p-8 bg-white border-t border-gray-200/60">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <Input
-              placeholder="Search areas..."
+              placeholder="Search areas by name or city..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
+              icon={<MapPin className="w-4 h-4" />}
+              className="w-full"
             />
             <Select
               options={cityOptions}
               value={cityFilter}
               onChange={(e) => setCityFilter(e.target.value)}
+              className="w-full"
             />
           </div>
-
-          <DataTable
-            columns={columns}
-            data={filteredAreas}
-            loading={loading}
-            emptyText="No areas found"
-          />
         </div>
       </div>
 
-      {/* Edit Modal */}
+      {/* Enhanced Data Table */}
+      <div className="surface overflow-hidden">
+        <DataTable
+          columns={columns}
+          data={filteredAreas}
+          loading={loading}
+          emptyText="No areas found"
+        />
+      </div>
+
+      {/* Enhanced Edit Modal */}
       <Modal
         isOpen={isEditModalOpen}
         onClose={() => setIsEditModalOpen(false)}
         title={editingArea ? 'Edit Area' : 'Add New Area'}
         footer={
           <>
-            <Button variant="secondary" onClick={() => setIsEditModalOpen(false)}>
+            <Button variant="secondary" onClick={() => setIsEditModalOpen(false)} className="px-6 py-3">
               Cancel
             </Button>
-            <Button variant="primary" onClick={handleSave} loading={saving}>
+            <Button variant="primary" onClick={handleSave} loading={saving} className="px-6 py-3">
               Save
             </Button>
           </>
         }
       >
-        <div className="space-y-4">
-          <Input
-            label="Area Name"
-            value={formData.name}
-            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-            placeholder="Enter area name"
-          />
-          <Select
-            label="City"
-            options={cityFormOptions}
-            value={formData.city_id}
-            onChange={(e) => setFormData({ ...formData, city_id: e.target.value })}
-          />
+        <div className="space-y-6">
+          <div className="bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200/60 rounded-2xl p-6">
+            <h4 className="font-semibold text-blue-900 mb-4 flex items-center gap-2">
+              <MapPin className="w-5 h-5 text-blue-600" />
+              Area Information
+            </h4>
+            <div className="text-sm text-blue-800">
+              Enter the area details below. The area will be associated with the selected city for business lead generation.
+            </div>
+          </div>
+
+          <div className="space-y-6">
+            <Input
+              label="Area Name"
+              value={formData.name}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              placeholder="Enter area name"
+              className="w-full"
+            />
+            <Select
+              label="City"
+              options={cityFormOptions}
+              value={formData.city_id}
+              onChange={(e) => setFormData({ ...formData, city_id: e.target.value })}
+              className="w-full"
+            />
+          </div>
         </div>
       </Modal>
 
-      {/* Confirm Delete Modal */}
+      {/* Enhanced Confirm Delete Modal */}
       <Modal
         isOpen={isConfirmModalOpen}
         onClose={() => setIsConfirmModalOpen(false)}
@@ -266,18 +321,25 @@ export const AreasManagement: React.FC = () => {
         size="sm"
         footer={
           <>
-            <Button variant="secondary" onClick={() => setIsConfirmModalOpen(false)}>
+            <Button variant="secondary" onClick={() => setIsConfirmModalOpen(false)} className="px-6 py-3">
               Cancel
             </Button>
-            <Button variant="danger" onClick={handleConfirmDelete}>
+            <Button variant="danger" onClick={handleConfirmDelete} className="px-6 py-3">
               Delete
             </Button>
           </>
         }
       >
-        <p className="text-sm leading-relaxed">
-          Are you sure you want to delete "{deletingArea?.name}"?
-        </p>
+        <div className="text-center">
+          <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <Trash2 className="w-8 h-8 text-red-600" />
+          </div>
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">Delete Area?</h3>
+          <p className="text-gray-600 leading-relaxed">
+            Are you sure you want to delete <strong>"{deletingArea?.name}"</strong>? 
+            This action cannot be undone.
+          </p>
+        </div>
       </Modal>
     </div>
   );

@@ -158,3 +158,77 @@ export const SkeletonDashboard: React.FC<{ className?: string }> = ({ className 
     </div>
   </div>
 );
+
+// Business-specific skeletons
+export const BusinessRowSkeleton: React.FC = () => (
+  <div className="flex items-center px-5 py-2.5 border-b border-gray-100 animate-pulse-subtle">
+    <div className="w-6 flex justify-center">
+      <Skeleton variant="circular" width={16} height={16} />
+    </div>
+    <div className="w-6 flex justify-center ml-2">
+      <Skeleton variant="rectangular" width={16} height={16} />
+    </div>
+    <div className="flex-1 grid grid-cols-6 gap-4 items-center ml-2">
+      <div className="col-span-2 space-y-1">
+        <Skeleton variant="text" width="75%" height={16} />
+        <Skeleton variant="text" width="50%" height={12} />
+        <Skeleton variant="rectangular" width={60} height={18} className="rounded-full" />
+      </div>
+      <div className="space-y-1">
+        <Skeleton variant="text" width={80} height={12} />
+        <Skeleton variant="text" width={64} height={12} />
+      </div>
+      <div className="space-y-1">
+        <Skeleton variant="text" width={24} height={12} />
+        <Skeleton variant="text" width={48} height={12} />
+      </div>
+      <div>
+        <Skeleton variant="rectangular" width={64} height={20} className="rounded-full" />
+      </div>
+      <div>
+        <Skeleton variant="text" width={48} height={12} />
+      </div>
+    </div>
+    <div className="w-10 flex justify-center">
+      <Skeleton variant="circular" width={16} height={16} />
+    </div>
+  </div>
+);
+
+export const BusinessTableSkeleton: React.FC<{ rows?: number }> = ({ rows = 10 }) => (
+  <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+    <div className="sticky top-0 z-10 bg-gray-50/80 backdrop-blur border-b border-gray-200 px-5 py-2">
+      <div className="flex items-center animate-pulse-subtle">
+        <div className="w-6 flex justify-center">
+          <Skeleton variant="circular" width={16} height={16} />
+        </div>
+        <div className="w-6 flex justify-center">
+          <Skeleton variant="rectangular" width={16} height={16} />
+        </div>
+        <div className="flex-1 grid grid-cols-6 gap-4">
+          <div className="col-span-2">
+            <Skeleton variant="text" width={80} height={12} />
+          </div>
+          <div>
+            <Skeleton variant="text" width={60} height={12} />
+          </div>
+          <div>
+            <Skeleton variant="text" width={50} height={12} />
+          </div>
+          <div>
+            <Skeleton variant="text" width={45} height={12} />
+          </div>
+          <div>
+            <Skeleton variant="text" width={35} height={12} />
+          </div>
+        </div>
+        <div className="w-10"></div>
+      </div>
+    </div>
+    <div className="divide-y divide-gray-100">
+      {Array.from({ length: rows }).map((_, index) => (
+        <BusinessRowSkeleton key={index} />
+      ))}
+    </div>
+  </div>
+);

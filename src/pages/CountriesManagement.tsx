@@ -1,43 +1,30 @@
-import React, { useState, useEffect } from 'react';
-import { Plus, Edit2, Trash2 } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { Plus, Edit2, Trash2, Globe, Users, Target } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { DataTable } from '../components/tables/DataTable';
 import { Button } from '../components/common/Button';
 import { Input } from '../components/common/Input';
 import { Modal } from '../components/common/Modal';
-import { countryApi } from '../utils/api';
+import { useCountries, useCountryMutation } from '../hooks/useOptimizedQuery';
 import type { Country } from '../utils/types';
 
 export const CountriesManagement: React.FC = () => {
-  const { state, dispatch, showNotification, hideNotification } = useApp();
-  const [loading, setLoading] = useState(true);
+  const { showNotification, hideNotification } = useApp();
+  const { data: countries = [], isLoading, error } = useCountries();
+  const countryMutation = useCountryMutation();
+  
   const [searchTerm, setSearchTerm] = useState('');
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
   const [editingCountry, setEditingCountry] = useState<Country | null>(null);
   const [deletingCountry, setDeleteingCountry] = useState<Country | null>(null);
   const [formData, setFormData] = useState({ name: '', iso_code: '' });
-  const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    loadCountries();
-  }, []);
-
-  const loadCountries = async () => {
-    setLoading(true);
-    try {
-      const countries = await countryApi.getAll();
-      dispatch({ type: 'SET_ALL_COUNTRIES', payload: countries });
-    } catch (error) {
-      console.error('Failed to load countries:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const filteredCountries = state.allCountries.filter(country =>
-    country.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    country.iso_code.toLowerCase().includes(searchTerm.toLowerCase())
+  const filteredCountries = useMemo(() => 
+    countries.filter(country =>
+      country.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      country.iso_code.toLowerCase().includes(searchTerm.toLowerCase())
+    ), [countries, searchTerm]
   );
 
   const handleAdd = () => {
@@ -63,29 +50,32 @@ export const CountriesManagement: React.FC = () => {
       return;
     }
 
-    setSaving(true);
     try {
       if (editingCountry) {
-        await countryApi.update(editingCountry.id, {
-          name: formData.name.trim(),
-          iso_code: formData.iso_code.trim().toUpperCase()
+        await countryMutation.mutateAsync({
+          type: 'update',
+          id: editingCountry.id,
+          payload: {
+            name: formData.name.trim(),
+            iso_code: formData.iso_code.trim().toUpperCase()
+          }
         });
         showNotification('success', 'Country Updated', 'Operation completed', 'Country updated successfully.');
       } else {
-        await countryApi.create({
-          name: formData.name.trim(),
-          iso_code: formData.iso_code.trim().toUpperCase()
+        await countryMutation.mutateAsync({
+          type: 'create',
+          payload: {
+            name: formData.name.trim(),
+            iso_code: formData.iso_code.trim().toUpperCase()
+          }
         });
         showNotification('success', 'Country Added', 'Operation completed', 'Country added successfully.');
       }
 
       setIsEditModalOpen(false);
-      loadCountries();
       setTimeout(hideNotification, 2000);
     } catch (error: any) {
       alert('Error saving country: ' + error.message);
-    } finally {
-      setSaving(false);
     }
   };
 
@@ -93,9 +83,11 @@ export const CountriesManagement: React.FC = () => {
     if (!deletingCountry) return;
 
     try {
-      await countryApi.delete(deletingCountry.id);
+      await countryMutation.mutateAsync({
+        type: 'delete',
+        id: deletingCountry.id
+      });
       setIsConfirmModalOpen(false);
-      loadCountries();
       showNotification('success', 'Country Deleted', 'Operation completed', 'Country deleted successfully.');
       setTimeout(hideNotification, 2000);
     } catch (error: any) {
@@ -108,17 +100,20 @@ export const CountriesManagement: React.FC = () => {
       key: 'id',
       title: 'ID',
       width: '80px',
-      render: (value: number) => <strong>{value}</strong>
+      render: (value: number) => <strong className="text-gray-900">{value}</strong>
     },
     {
       key: 'name',
-      title: 'Name'
+      title: 'Name',
+      render: (value: string) => (
+        <div className="font-semibold text-gray-900">{value}</div>
+      )
     },
     {
       key: 'iso_code',
       title: 'ISO Code',
       render: (value: string) => (
-        <span className="bg-[rgba(0,0,0,0.06)] px-2 py-1 rounded-md font-mono text-xs">
+        <span className="bg-gradient-to-r from-blue-50 to-purple-50 text-blue-700 px-3 py-1.5 rounded-lg font-mono text-sm font-semibold border border-blue-200">
           {value}
         </span>
       )
@@ -126,41 +121,56 @@ export const CountriesManagement: React.FC = () => {
     {
       key: 'cities_count',
       title: 'Cities Count',
-      render: (value: number) => value || 0
+      render: (value: number) => (
+        <div className="text-center">
+          <div className="text-lg font-bold text-gray-900">{value || 0}</div>
+          <div className="text-xs text-gray-500">cities</div>
+        </div>
+      )
     },
     {
       key: 'cities_populated',
       title: 'Cities Populated',
       render: (value: boolean) => value ? (
-        <span className="text-[#34c759]">✓ Yes</span>
+        <div className="flex items-center gap-2 text-green-600">
+          <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+          <span className="font-semibold text-sm">Yes</span>
+        </div>
       ) : (
-        <span className="text-[#ff3b30]">✗ No</span>
+        <div className="flex items-center gap-2 text-red-600">
+          <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+          <span className="font-semibold text-sm">No</span>
+        </div>
       )
     },
     {
       key: 'created_at',
       title: 'Created',
-      render: (value: string) => new Date(value).toLocaleDateString()
+      render: (value: string) => (
+        <div className="text-sm text-gray-600">
+          {new Date(value).toLocaleDateString()}
+        </div>
+      )
     },
     {
       key: 'actions',
       title: 'Actions',
-      width: '160px',
+      width: '180px',
       render: (_: any, record: Country) => (
         <div className="flex gap-2">
           <Button
             variant="secondary"
             onClick={() => handleEdit(record)}
-            className="px-3 py-1.5 text-xs"
-            icon={<Edit2 className="w-3 h-3" />}
+            className="px-3 py-2 text-sm"
+            icon={<Edit2 className="w-4 h-4" />}
           >
             Edit
           </Button>
           <Button
             variant="danger"
             onClick={() => handleDelete(record)}
-            className="px-3 py-1.5 text-xs"
-            icon={<Trash2 className="w-3 h-3" />}
+            className="px-3 py-2 text-sm"
+            icon={<Trash2 className="w-4 h-4" />}
           >
             Delete
           </Button>
@@ -170,73 +180,100 @@ export const CountriesManagement: React.FC = () => {
   ];
 
   return (
-    <div>
-      <div className="bg-[rgba(255,255,255,0.72)] backdrop-blur-md rounded-2xl border border-[rgba(0,0,0,0.08)] shadow-[0_2px_15px_rgba(0,0,0,0.08)] overflow-hidden">
-        <div className="flex justify-between items-center p-7 border-b border-[rgba(0,0,0,0.08)]">
-          <h3 className="text-xl font-semibold text-[#1d1d1f] tracking-[-0.025em]">
-            Countries Database Management
-          </h3>
-          <Button
-            variant="primary"
-            onClick={handleAdd}
-            icon={<Plus className="w-4 h-4" />}
-          >
-            Add Country
-          </Button>
+    <div className="space-y-6">
+      {/* Enhanced Header */}
+      <div className="bg-gradient-to-r from-white to-gray-50/50 backdrop-blur-xl rounded-3xl border border-gray-200/60 shadow-lg overflow-hidden">
+        <div className="p-8 border-b border-gray-200/60 bg-gradient-to-r from-blue-50/30 to-purple-50/30">
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+            <div>
+              <h1 className="text-3xl font-bold text-gray-900 tracking-tight mb-2">
+                Countries Database Management
+              </h1>
+              <p className="text-lg text-gray-600">
+                Manage countries and their geographical data for lead generation
+              </p>
+            </div>
+            <Button
+              variant="primary"
+              onClick={handleAdd}
+              icon={<Plus className="w-4 h-4" />}
+              className="px-6 py-3"
+            >
+              Add Country
+            </Button>
+          </div>
         </div>
 
-        <div className="p-8">
-          <div className="mb-6">
-            <Input
-              placeholder="Search countries..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </div>
-
-          <DataTable
-            columns={columns}
-            data={filteredCountries}
-            loading={loading}
-            emptyText="No countries found"
+        {/* Enhanced Search */}
+        <div className="p-8 bg-white border-t border-gray-200/60">
+          <Input
+            placeholder="Search countries by name or ISO code..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            icon={<Globe className="w-4 h-4" />}
+            className="w-full"
           />
         </div>
       </div>
 
-      {/* Edit Modal */}
+      {/* Enhanced Data Table */}
+      <div className="surface overflow-hidden">
+        <DataTable
+          columns={columns}
+          data={filteredCountries}
+          loading={isLoading}
+          emptyText="No countries found"
+        />
+      </div>
+
+      {/* Enhanced Edit Modal */}
       <Modal
         isOpen={isEditModalOpen}
         onClose={() => setIsEditModalOpen(false)}
         title={editingCountry ? 'Edit Country' : 'Add New Country'}
         footer={
           <>
-            <Button variant="secondary" onClick={() => setIsEditModalOpen(false)}>
+            <Button variant="secondary" onClick={() => setIsEditModalOpen(false)} className="px-6 py-3">
               Cancel
             </Button>
-            <Button variant="primary" onClick={handleSave} loading={saving}>
+            <Button variant="primary" onClick={handleSave} loading={countryMutation.isPending} className="px-6 py-3">
               Save
             </Button>
           </>
         }
       >
-        <div className="space-y-4">
-          <Input
-            label="Country Name"
-            value={formData.name}
-            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-            placeholder="Enter country name"
-          />
-          <Input
-            label="ISO Code"
-            value={formData.iso_code}
-            onChange={(e) => setFormData({ ...formData, iso_code: e.target.value.toUpperCase() })}
-            placeholder="e.g., US, GB, PK"
-            maxLength={2}
-          />
+        <div className="space-y-6">
+          <div className="bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200/60 rounded-2xl p-6">
+            <h4 className="font-semibold text-blue-900 mb-4 flex items-center gap-2">
+              <Globe className="w-5 h-5 text-blue-600" />
+              Country Information
+            </h4>
+            <div className="text-sm text-blue-800">
+              Enter the country details below. The ISO code should be a 2-letter country code (e.g., US, GB, PK).
+            </div>
+          </div>
+
+          <div className="space-y-6">
+            <Input
+              label="Country Name"
+              value={formData.name}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              placeholder="Enter country name"
+              className="w-full"
+            />
+            <Input
+              label="ISO Code"
+              value={formData.iso_code}
+              onChange={(e) => setFormData({ ...formData, iso_code: e.target.value.toUpperCase() })}
+              placeholder="e.g., US, GB, PK"
+              maxLength={2}
+              className="w-full"
+            />
+          </div>
         </div>
       </Modal>
 
-      {/* Confirm Delete Modal */}
+      {/* Enhanced Confirm Delete Modal */}
       <Modal
         isOpen={isConfirmModalOpen}
         onClose={() => setIsConfirmModalOpen(false)}
@@ -244,18 +281,25 @@ export const CountriesManagement: React.FC = () => {
         size="sm"
         footer={
           <>
-            <Button variant="secondary" onClick={() => setIsConfirmModalOpen(false)}>
+            <Button variant="secondary" onClick={() => setIsConfirmModalOpen(false)} className="px-6 py-3">
               Cancel
             </Button>
-            <Button variant="danger" onClick={handleConfirmDelete}>
+            <Button variant="danger" onClick={handleConfirmDelete} className="px-6 py-3">
               Delete
             </Button>
           </>
         }
       >
-        <p className="text-sm leading-relaxed">
-          Are you sure you want to delete "{deletingCountry?.name}"? This will also delete all associated cities and areas.
-        </p>
+        <div className="text-center">
+          <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <Trash2 className="w-8 h-8 text-red-600" />
+          </div>
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">Delete Country?</h3>
+          <p className="text-gray-600 leading-relaxed">
+            Are you sure you want to delete <strong>"{deletingCountry?.name}"</strong>? 
+            This will also delete all associated cities and areas. This action cannot be undone.
+          </p>
+        </div>
       </Modal>
     </div>
   );

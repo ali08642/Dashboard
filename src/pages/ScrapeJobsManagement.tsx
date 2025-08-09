@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Plus, Play, Trash2, RefreshCw, Search } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { Plus, Play, Trash2, RefreshCw, Search, Globe, MapPin, Target, Clock, CheckCircle, AlertCircle } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { DataTable } from '../components/tables/DataTable';
 import { Button } from '../components/common/Button';
@@ -10,7 +10,7 @@ import { countryApi, scrapeJobApi } from '../utils/api';
 import type { Country, City, Area, ScrapeJob } from '../utils/types';
 
 export const ScrapeJobsManagement: React.FC = () => {
-  const { state, dispatch, showNotification, hideNotification } = useApp();
+  const { dispatch, showNotification, hideNotification } = useApp();
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -34,11 +34,7 @@ export const ScrapeJobsManagement: React.FC = () => {
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
   const [deletingJob, setDeletingJob] = useState<ScrapeJob | null>(null);
 
-  useEffect(() => {
-    loadInitialData();
-  }, []);
-
-  const loadInitialData = async () => {
+  const loadInitialData = useCallback(async () => {
     setLoading(true);
     try {
       const [countriesData, jobsData] = await Promise.all([
@@ -56,7 +52,11 @@ export const ScrapeJobsManagement: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [dispatch, showNotification, hideNotification]);
+
+  useEffect(() => {
+    loadInitialData();
+  }, [loadInitialData]);
 
   const loadJobs = async () => {
     try {
@@ -178,10 +178,10 @@ export const ScrapeJobsManagement: React.FC = () => {
     setLoadingAreas(false);
   };
 
-  const handleDelete = (job: ScrapeJob) => {
+  const handleDelete = useCallback((job: ScrapeJob) => {
     setDeletingJob(job);
     setIsConfirmModalOpen(true);
-  };
+  }, []);
 
   const handleConfirmDelete = async () => {
     if (!deletingJob) return;
@@ -200,51 +200,53 @@ export const ScrapeJobsManagement: React.FC = () => {
   };
 
   // Filter jobs based on search term and status
-  const filteredJobs = jobs.filter(job => {
-    const matchesSearch = (
-      job.keyword.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      job.areas?.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      job.areas?.cities?.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      job.areas?.cities?.countries?.name.toLowerCase().includes(searchTerm.toLowerCase())
-    );
-    
-    const matchesStatus = statusFilter === 'all' || job.status === statusFilter;
-    
-    return matchesSearch && matchesStatus;
-  });
+  const filteredJobs = useMemo(() => {
+    return jobs.filter(job => {
+      const matchesSearch = (
+        job.keyword.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        job.areas?.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        job.areas?.cities?.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        job.areas?.cities?.countries?.name.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+      
+      const matchesStatus = statusFilter === 'all' || job.status === statusFilter;
+      
+      return matchesSearch && matchesStatus;
+    });
+  }, [jobs, searchTerm, statusFilter]);
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'pending': return '#ff9500';
-      case 'running': return '#0071e3';
-      case 'completed': return '#34c759';
-      case 'failed': return '#ff3b30';
-      default: return '#86868b';
+      case 'pending': return '#f59e0b';
+      case 'running': return '#3b82f6';
+      case 'completed': return '#10b981';
+      case 'failed': return '#ef4444';
+      default: return '#6b7280';
     }
   };
 
   const getStatusIcon = (status: string) => {
     switch (status) {
-      case 'pending': return '⏳';
-      case 'running': return '🔄';
-      case 'completed': return '✅';
-      case 'failed': return '❌';
-      default: return '⚪';
+      case 'pending': return <Clock className="w-4 h-4" />;
+      case 'running': return <RefreshCw className="w-4 h-4 animate-spin" />;
+      case 'completed': return <CheckCircle className="w-4 h-4" />;
+      case 'failed': return <AlertCircle className="w-4 h-4" />;
+      default: return <Clock className="w-4 h-4" />;
     }
   };
 
-  const columns = [
+  const columns = useMemo(() => [
     {
       key: 'id',
       title: 'ID',
       width: '80px',
-      render: (value: number) => <strong>#{value}</strong>
+      render: (value: number) => <strong className="text-gray-900">#{value}</strong>
     },
     {
       key: 'keyword',
       title: 'Keyword',
       render: (value: string) => (
-        <span className="bg-[rgba(0,113,227,0.1)] text-[#0071e3] px-2 py-1 rounded-md font-medium text-sm">
+        <span className="bg-gradient-to-r from-blue-50 to-purple-50 text-blue-700 px-3 py-1.5 rounded-lg font-semibold text-sm border border-blue-200">
           {value}
         </span>
       )
@@ -253,9 +255,10 @@ export const ScrapeJobsManagement: React.FC = () => {
       key: 'location',
       title: 'Location',
       render: (_: unknown, record: ScrapeJob) => (
-        <div className="text-sm">
-          <div className="font-medium">{record.areas?.name}</div>
-          <div className="text-[#86868b]">
+        <div className="space-y-1">
+          <div className="font-semibold text-gray-900">{record.areas?.name}</div>
+          <div className="text-sm text-gray-500 flex items-center gap-1">
+            <MapPin className="w-3 h-3" />
             {record.areas?.cities?.name}, {record.areas?.cities?.countries?.name}
           </div>
         </div>
@@ -264,14 +267,14 @@ export const ScrapeJobsManagement: React.FC = () => {
     {
       key: 'status',
       title: 'Status',
-      width: '120px',
+      width: '140px',
       render: (value: string) => (
         <div className="flex items-center gap-2">
-          <span style={{ color: getStatusColor(value) }}>
+          <div style={{ color: getStatusColor(value) }}>
             {getStatusIcon(value)}
-          </span>
+          </div>
           <span 
-            className="font-medium text-sm capitalize"
+            className="font-semibold text-sm capitalize"
             style={{ color: getStatusColor(value) }}
           >
             {value}
@@ -282,63 +285,79 @@ export const ScrapeJobsManagement: React.FC = () => {
     {
       key: 'businesses_found',
       title: 'Businesses Found',
-      width: '140px',
-      render: (value: number) => value || 0
+      width: '160px',
+      render: (value: number) => (
+        <div className="text-center">
+          <div className="text-lg font-bold text-gray-900">{value || 0}</div>
+          <div className="text-xs text-gray-500">businesses</div>
+        </div>
+      )
     },
     {
       key: 'processing_time_seconds',
       title: 'Processing Time',
-      width: '140px',
-      render: (value: number) => value ? `${value}s` : '-'
+      width: '160px',
+      render: (value: number) => value ? (
+        <div className="text-center">
+          <div className="text-lg font-bold text-gray-900">{value}s</div>
+          <div className="text-xs text-gray-500">duration</div>
+        </div>
+      ) : (
+        <span className="text-gray-400">-</span>
+      )
     },
     {
       key: 'created_at',
       title: 'Created',
-      width: '120px',
-      render: (value: string) => new Date(value).toLocaleDateString()
+      width: '140px',
+      render: (value: string) => (
+        <div className="text-sm text-gray-600">
+          {new Date(value).toLocaleDateString()}
+        </div>
+      )
     },
     {
       key: 'actions',
       title: 'Actions',
-      width: '100px',
+      width: '120px',
       render: (_: unknown, record: ScrapeJob) => (
-        <div className="flex gap-2">
+        <div className="flex justify-center">
           <Button
             variant="danger"
             onClick={() => handleDelete(record)}
-            className="px-3 py-1.5 text-xs"
-            icon={<Trash2 className="w-3 h-3" />}
+            className="px-3 py-2 text-sm"
+            icon={<Trash2 className="w-4 h-4" />}
           >
             Delete
           </Button>
         </div>
       )
     }
-  ];
+  ], [handleDelete]);
 
-  const countryOptions = [
+  const countryOptions = useMemo(() => [
     { value: '', label: 'Select a country' },
     ...countries.map(country => ({
       value: country.id.toString(),
       label: country.name
     }))
-  ];
+  ], [countries]);
 
-  const cityOptions = [
+  const cityOptions = useMemo(() => [
     { value: '', label: 'Select a city' },
     ...cities.map(city => ({
       value: city.id.toString(),
       label: city.name
     }))
-  ];
+  ], [cities]);
 
-  const areaOptions = [
+  const areaOptions = useMemo(() => [
     { value: '', label: 'Select an area' },
     ...areas.map(area => ({
       value: area.id.toString(),
       label: area.name
     }))
-  ];
+  ], [areas]);
 
   const statusOptions = [
     { value: 'all', label: 'All Statuses' },
@@ -349,65 +368,76 @@ export const ScrapeJobsManagement: React.FC = () => {
   ];
 
   return (
-    <div>
-      <div className="bg-[rgba(255,255,255,0.72)] backdrop-blur-md rounded-2xl border border-[rgba(0,0,0,0.08)] shadow-[0_2px_15px_rgba(0,0,0,0.08)] overflow-hidden">
-        <div className="flex justify-between items-center p-7 border-b border-[rgba(0,0,0,0.08)]">
-          <div>
-            <h3 className="text-[22px] font-semibold text-[#1d1d1f] tracking-[-0.025em] leading-[1.2]">
-              Scraping Jobs Management
-            </h3>
-            <p className="text-[15px] text-[#86868b] mt-1 tracking-[-0.015em]">
-              Create and manage distributed scraping jobs
-            </p>
-          </div>
-          <div className="flex gap-3">
-            <Button
-              variant="secondary"
-              onClick={handleRefresh}
-              loading={refreshing}
-              icon={<RefreshCw className="w-4 h-4" />}
-            >
-              Refresh
-            </Button>
-            <Button
-              variant="primary"
-              onClick={() => setIsCreateModalOpen(true)}
-              icon={<Plus className="w-4 h-4" />}
-            >
-              Create Job
-            </Button>
+    <div className="space-y-6">
+      {/* Enhanced Header */}
+      <div className="bg-gradient-to-r from-white to-gray-50/50 backdrop-blur-xl rounded-3xl border border-gray-200/60 shadow-lg overflow-hidden">
+        <div className="p-8 border-b border-gray-200/60 bg-gradient-to-r from-blue-50/30 to-purple-50/30">
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+            <div>
+              <h1 className="text-3xl font-bold text-gray-900 tracking-tight mb-2">
+                Scraping Jobs Management
+              </h1>
+              <p className="text-lg text-gray-600">
+                Create and manage distributed scraping jobs for business lead generation
+              </p>
+            </div>
+            <div className="flex gap-3">
+              <Button
+                variant="secondary"
+                onClick={handleRefresh}
+                loading={refreshing}
+                icon={<RefreshCw className="w-4 h-4" />}
+                className="px-6 py-3"
+              >
+                Refresh
+              </Button>
+              <Button
+                variant="primary"
+                onClick={() => setIsCreateModalOpen(true)}
+                icon={<Plus className="w-4 h-4" />}
+                className="px-6 py-3"
+              >
+                Create Job
+              </Button>
+            </div>
           </div>
         </div>
 
-        <div className="p-8">
-          <div className="flex gap-4 mb-6">
-            <div className="flex-1">
+        {/* Enhanced Filters */}
+        <div className="p-8 bg-white border-t border-gray-200/60">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="lg:col-span-2">
               <Input
                 placeholder="Search jobs by keyword, area, city, or country..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 icon={<Search className="w-4 h-4" />}
+                className="w-full"
               />
             </div>
-            <div className="w-48">
+            <div>
               <Select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
                 options={statusOptions}
+                className="w-full"
               />
             </div>
           </div>
-
-          <DataTable
-            columns={columns}
-            data={filteredJobs}
-            loading={loading}
-            emptyText="No scraping jobs found"
-          />
         </div>
       </div>
 
-      {/* Create Job Modal */}
+      {/* Enhanced Jobs Table */}
+      <div className="surface overflow-hidden">
+        <DataTable
+          columns={columns}
+          data={filteredJobs}
+          loading={loading}
+          emptyText="No scraping jobs found"
+        />
+      </div>
+
+      {/* Enhanced Create Job Modal */}
       <Modal
         isOpen={isCreateModalOpen}
         onClose={() => {
@@ -424,6 +454,7 @@ export const ScrapeJobsManagement: React.FC = () => {
                 setIsCreateModalOpen(false);
                 resetCreateForm();
               }}
+              className="px-6 py-3"
             >
               Cancel
             </Button>
@@ -432,24 +463,27 @@ export const ScrapeJobsManagement: React.FC = () => {
               onClick={handleCreateJob} 
               loading={creatingJob}
               icon={<Play className="w-4 h-4" />}
+              className="px-6 py-3"
             >
               Create Job
             </Button>
           </>
         }
       >
-        <div className="space-y-6">
-          <div className="bg-[rgba(0,113,227,0.06)] border border-[rgba(0,113,227,0.2)] rounded-xl p-4">
-            <h4 className="font-medium text-[#0071e3] mb-2 flex items-center gap-2">
-              <span className="w-2 h-2 bg-[#0071e3] rounded-full"></span>
+        <div className="space-y-8">
+          {/* Job Creation Flow Guide */}
+          <div className="bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200/60 rounded-2xl p-6">
+            <h4 className="font-semibold text-blue-900 mb-4 flex items-center gap-2">
+              <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
               Job Creation Flow
             </h4>
-            <div className="text-sm text-[#0071e3] leading-relaxed">
+            <div className="text-sm text-blue-800 leading-relaxed">
               Follow these steps: <strong>Country</strong> → <strong>City</strong> → <strong>Area</strong> → <strong>Keyword</strong>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Location Selection */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="relative">
               <Select
                 label="Country"
@@ -457,10 +491,11 @@ export const ScrapeJobsManagement: React.FC = () => {
                 onChange={handleCountryChange}
                 options={countryOptions}
                 disabled={countries.length === 0}
+                className="w-full"
               />
               {selectedCountryId && (
-                <div className="absolute -top-1 -right-1 w-6 h-6 bg-[#34c759] rounded-full flex items-center justify-center">
-                  <span className="text-white text-xs font-bold">✓</span>
+                <div className="absolute top-8 -right-2 w-6 h-6 bg-green-500 rounded-full flex items-center justify-center">
+                  <CheckCircle className="w-4 h-4 text-white" />
                 </div>
               )}
             </div>
@@ -472,15 +507,16 @@ export const ScrapeJobsManagement: React.FC = () => {
                 onChange={handleCityChange}
                 options={loadingCities ? [{ value: '', label: 'Loading cities...' }] : cityOptions}
                 disabled={!selectedCountryId || loadingCities}
+                className="w-full"
               />
               {loadingCities && (
-                <div className="absolute -top-1 -right-1 w-6 h-6 bg-[#0071e3] rounded-full flex items-center justify-center">
-                  <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                <div className="absolute top-8 -right-2 w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center">
+                  <RefreshCw className="w-4 h-4 text-white animate-spin" />
                 </div>
               )}
               {selectedCityId && !loadingCities && (
-                <div className="absolute -top-1 -right-1 w-6 h-6 bg-[#34c759] rounded-full flex items-center justify-center">
-                  <span className="text-white text-xs font-bold">✓</span>
+                <div className="absolute top-8 -right-2 w-6 h-6 bg-green-500 rounded-full flex items-center justify-center">
+                  <CheckCircle className="w-4 h-4 text-white" />
                 </div>
               )}
             </div>
@@ -493,15 +529,16 @@ export const ScrapeJobsManagement: React.FC = () => {
               onChange={handleAreaChange}
               options={loadingAreas ? [{ value: '', label: 'Loading areas...' }] : areaOptions}
               disabled={!selectedCityId || loadingAreas}
+              className="w-full"
             />
             {loadingAreas && (
-              <div className="absolute -top-1 -right-1 w-6 h-6 bg-[#0071e3] rounded-full flex items-center justify-center">
-                <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+              <div className="absolute top-8 -right-2 w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center">
+                <RefreshCw className="w-4 h-4 text-white animate-spin" />
               </div>
             )}
             {selectedAreaId && !loadingAreas && (
-              <div className="absolute -top-1 -right-1 w-6 h-6 bg-[#34c759] rounded-full flex items-center justify-center">
-                <span className="text-white text-xs font-bold">✓</span>
+              <div className="absolute top-8 -right-2 w-6 h-6 bg-green-500 rounded-full flex items-center justify-center">
+                <CheckCircle className="w-4 h-4 text-white" />
               </div>
             )}
           </div>
@@ -512,31 +549,36 @@ export const ScrapeJobsManagement: React.FC = () => {
               value={keyword}
               onChange={(e) => setKeyword(e.target.value)}
               placeholder="e.g., restaurants, hotels, shops"
-              hint="Enter the business type or keyword to search for in the selected area"
+              className="w-full"
             />
             {keyword.trim() && (
-              <div className="absolute top-6 -right-1 w-6 h-6 bg-[#34c759] rounded-full flex items-center justify-center">
-                <span className="text-white text-xs font-bold">✓</span>
+              <div className="absolute top-8 -right-2 w-6 h-6 bg-green-500 rounded-full flex items-center justify-center">
+                <CheckCircle className="w-4 h-4 text-white" />
               </div>
             )}
+            <div className="mt-2 text-sm text-gray-500">
+              Enter the business type or keyword to search for in the selected area
+            </div>
           </div>
 
+          {/* Job Summary */}
           {selectedAreaId && keyword && (
-            <div className="bg-[rgba(52,199,89,0.06)] border border-[rgba(52,199,89,0.2)] rounded-xl p-4">
-              <h4 className="font-medium text-[#34c759] mb-3 flex items-center gap-2">
-                <span className="w-2 h-2 bg-[#34c759] rounded-full animate-pulse"></span>
+            <div className="bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200/60 rounded-2xl p-6">
+              <h4 className="font-semibold text-green-900 mb-4 flex items-center gap-2">
+                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
                 Ready to Create Job
               </h4>
-              <div className="space-y-2 text-sm text-[#34c759]">
-                <div className="flex items-center gap-2">
-                  <span className="font-medium">Keyword:</span>
-                  <span className="bg-[rgba(52,199,89,0.15)] px-2 py-1 rounded-md font-medium">
+              <div className="space-y-3 text-sm text-green-800">
+                <div className="flex items-center gap-3">
+                  <span className="font-semibold">Keyword:</span>
+                  <span className="bg-green-100 text-green-800 px-3 py-1 rounded-lg font-medium">
                     {keyword}
                   </span>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="font-medium">Location:</span>
-                  <span>
+                <div className="flex items-center gap-3">
+                  <span className="font-semibold">Location:</span>
+                  <span className="flex items-center gap-1">
+                    <MapPin className="w-4 h-4" />
                     {areas.find(a => a.id === selectedAreaId)?.name}
                     {cities.find(c => c.id === selectedCityId) && (
                       <>, {cities.find(c => c.id === selectedCityId)?.name}</>
@@ -552,7 +594,7 @@ export const ScrapeJobsManagement: React.FC = () => {
         </div>
       </Modal>
 
-      {/* Confirm Delete Modal */}
+      {/* Enhanced Confirm Delete Modal */}
       <Modal
         isOpen={isConfirmModalOpen}
         onClose={() => setIsConfirmModalOpen(false)}
@@ -560,19 +602,25 @@ export const ScrapeJobsManagement: React.FC = () => {
         size="sm"
         footer={
           <>
-            <Button variant="secondary" onClick={() => setIsConfirmModalOpen(false)}>
+            <Button variant="secondary" onClick={() => setIsConfirmModalOpen(false)} className="px-6 py-3">
               Cancel
             </Button>
-            <Button variant="danger" onClick={handleConfirmDelete}>
+            <Button variant="danger" onClick={handleConfirmDelete} className="px-6 py-3">
               Delete Job
             </Button>
           </>
         }
       >
-        <p className="text-sm leading-relaxed">
-          Are you sure you want to delete the scraping job for "{deletingJob?.keyword}" 
-          in {deletingJob?.areas?.name}? This action cannot be undone.
-        </p>
+        <div className="text-center">
+          <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <AlertCircle className="w-8 h-8 text-red-600" />
+          </div>
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">Delete Scraping Job?</h3>
+          <p className="text-gray-600 leading-relaxed">
+            Are you sure you want to delete the scraping job for <strong>"{deletingJob?.keyword}"</strong> 
+            in <strong>{deletingJob?.areas?.name}</strong>? This action cannot be undone.
+          </p>
+        </div>
       </Modal>
     </div>
   );

@@ -1,6 +1,9 @@
 import React, { useState } from 'react';
 import { AppProvider } from './context/AppContext';
 import { SidebarProvider } from './context/SidebarContext';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import { QueryProvider } from './context/QueryProvider';
+import { usePrefetch } from './hooks/useOptimizedQuery';
 import { Layout } from './components/layout/Layout';
 import { SettingsModal } from './components/modals/SettingsModal';
 import { Dashboard } from './pages/Dashboard';
@@ -10,10 +13,30 @@ import { AreasManagement } from './pages/AreasManagement';
 import { ScrapeJobsManagement } from './pages/ScrapeJobsManagement';
 import { BusinessesManagement } from './pages/BusinessesManagement';
 import { PlaceholderPage } from './pages/PlaceholderPage';
+import { Analytics } from './pages/Analytics';
+import { BusinessInteractions } from './pages/BusinessInteractions';
+import { Login } from './pages/Login';
 
-function App() {
+const AppContent: React.FC = () => {
   const [currentSection, setCurrentSection] = useState('dashboard');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const { state } = useAuth();
+  const { prefetchCountries, prefetchBusinessStats, prefetchBusinesses } = usePrefetch();
+
+  // Prefetch data for likely navigation targets
+  const handleSectionChange = (section: string) => {
+    setCurrentSection(section);
+    
+    // Prefetch data for sections user is likely to visit next
+    if (section === 'dashboard') {
+      prefetchBusinessStats();
+      prefetchBusinesses(); // Prefetch first page of businesses
+    } else if (section === 'businesses') {
+      prefetchBusinessStats(); // Stats are shown on business page
+    } else if (section === 'countries-management') {
+      prefetchCountries();
+    }
+  };
 
   const renderCurrentSection = () => {
     switch (currentSection) {
@@ -29,15 +52,29 @@ function App() {
         return <ScrapeJobsManagement />;
       case 'businesses':
         return <BusinessesManagement />;
+      case 'businesses-interactions':
+        return <BusinessInteractions />;
       case 'analytics':
-        return <PlaceholderPage 
-          title="Performance Analytics" 
-          description="Advanced analytics and reporting dashboard coming soon..." 
-        />;
+        return <Analytics />;
       default:
         return <Dashboard />;
     }
   };
+
+  if (state.loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!state.isAuthenticated) {
+    return <Login />;
+  }
 
   return (
     <AppProvider>
@@ -45,7 +82,7 @@ function App() {
         <div className="min-h-screen bg-gray-50 font-sans text-gray-900 leading-relaxed antialiased">
           <Layout
             currentSection={currentSection}
-            onSectionChange={setCurrentSection}
+            onSectionChange={handleSectionChange}
             onOpenSettings={() => setIsSettingsOpen(true)}
           >
             {renderCurrentSection()}
@@ -106,6 +143,16 @@ function App() {
         </div>
       </SidebarProvider>
     </AppProvider>
+  );
+};
+
+function App() {
+  return (
+    <QueryProvider>
+      <AuthProvider>
+        <AppContent />
+      </AuthProvider>
+    </QueryProvider>
   );
 }
 

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useReducer, ReactNode } from 'react';
+import React, { createContext, useContext, useReducer, ReactNode, useCallback } from 'react';
 import type { AppState, NotificationData, Country, City, Area } from '../utils/types';
 
 interface AppContextType {
@@ -107,18 +107,18 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [state, dispatch] = useReducer(appReducer, initialState);
   const [notification, notificationDispatch] = useReducer(notificationReducer, initialNotification);
 
-  const showNotification = (type: 'processing' | 'success', title: string, subtitle: string, message: string) => {
+  const showNotification = useCallback((type: 'processing' | 'success', title: string, subtitle: string, message: string) => {
     notificationDispatch({ type: 'SHOW_NOTIFICATION', payload: { type, title, subtitle, message } });
-  };
+  }, []);
 
-  const hideNotification = () => {
+  const hideNotification = useCallback(() => {
     notificationDispatch({ type: 'HIDE_NOTIFICATION' });
-  };
+  }, []);
 
-  const enhancedDispatch = (action: AppAction) => {
+  const enhancedDispatch = useCallback((action: AppAction) => {
     dispatch(action);
     notificationDispatch(action);
-  };
+  }, []);
 
   return (
     <AppContext.Provider value={{

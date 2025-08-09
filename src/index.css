@@ -1,3 +1,48 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer components {
+  .surface {
+    @apply bg-white rounded-2xl border border-gray-200 shadow-sm;
+  }
+  .surface-header {
+    @apply p-6 border-b border-gray-200;
+  }
+  .surface-body {
+    @apply p-6;
+  }
+  .card {
+    @apply bg-white rounded-xl border border-gray-200;
+  }
+  .card-muted {
+    @apply rounded-xl border border-gray-200 bg-gray-50;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium;
+  }
+  .chip-success {
+    @apply chip text-green-700 bg-green-100;
+  }
+  .chip-warning {
+    @apply chip text-orange-700 bg-orange-100;
+  }
+  .chip-info {
+    @apply chip text-gray-700 bg-gray-100;
+  }
+  .section-title {
+    @apply text-2xl font-semibold text-gray-900 tracking-[-0.02em];
+  }
+  .section-subtitle {
+    @apply text-sm text-gray-500;
+  }
+  .stat-card {
+    @apply card p-4 flex items-center justify-between; 
+  }
+  .list-header {
+    @apply bg-gray-50 border-b border-gray-200 px-6 py-4;
+  }
+  .list-row {
+    @apply flex items-center px-6 py-4 hover:bg-gray-50 transition-colors duration-200;
+  }
+}
