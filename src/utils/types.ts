@@ -128,4 +128,5 @@ export interface Configuration {
   supabaseKey: string;
   citiesWebhook: string;
   areasWebhook: string;
+  contextAreasWebhook: string;
 }

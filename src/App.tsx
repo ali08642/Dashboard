@@ -1,7 +1,10 @@
 import React, { useState } from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AppProvider } from './context/AppContext';
 import { SidebarProvider } from './context/SidebarContext';
-import { AuthProvider, useAuth } from './context/AuthContext';
+import './styles/animations.css';
+import { AuthProvider } from './context/AuthContext';
+import { useAuth } from './context/useAuth';
 import { QueryProvider } from './context/QueryProvider';
 import { usePrefetch } from './hooks/useOptimizedQuery';
 import { Layout } from './components/layout/Layout';
@@ -12,15 +15,35 @@ import { CitiesManagement } from './pages/CitiesManagement';
 import { AreasManagement } from './pages/AreasManagement';
 import { ScrapeJobsManagement } from './pages/ScrapeJobsManagement';
 import { BusinessesManagement } from './pages/BusinessesManagement';
-import { PlaceholderPage } from './pages/PlaceholderPage';
-import { Analytics } from './pages/Analytics';
 import { BusinessInteractions } from './pages/BusinessInteractions';
+import { Analytics } from './pages/Analytics';
 import { Login } from './pages/Login';
+import { Signup } from './pages/Signup';
+import { AuthStateDebugger } from './components/debug/AuthStateDebugger';
 
-const AppContent: React.FC = () => {
+// Protected Route Component
+const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { state } = useAuth();
+  
+  if (state.loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+      </div>
+    );
+  }
+  
+  if (!state.isAuthenticated) {
+    return <Navigate to="/login" replace />;
+  }
+  
+  return <>{children}</>;
+};
+
+// Main Dashboard Layout Component
+const DashboardLayout: React.FC = () => {
   const [currentSection, setCurrentSection] = useState('dashboard');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const { state } = useAuth();
   const { prefetchCountries, prefetchBusinessStats, prefetchBusinesses } = usePrefetch();
 
   // Prefetch data for likely navigation targets
@@ -61,21 +84,6 @@ const AppContent: React.FC = () => {
     }
   };
 
-  if (state.loading) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!state.isAuthenticated) {
-    return <Login />;
-  }
-
   return (
     <AppProvider>
       <SidebarProvider>
@@ -92,57 +100,88 @@ const AppContent: React.FC = () => {
             isOpen={isSettingsOpen}
             onClose={() => setIsSettingsOpen(false)}
           />
-
-        <style jsx global>{`
-          @keyframes progressAnimation {
-            0% { width: 20%; }
-            50% { width: 80%; }
-            100% { width: 20%; }
-          }
-          
-          .scrollbar-none::-webkit-scrollbar {
-            width: 0;
-          }
-          
-          .animate-pulse {
-            animation: pulse 2s infinite;
-          }
-          
-          @keyframes pulse {
-            0% { opacity: 1; }
-            50% { opacity: 0.5; }
-            100% { opacity: 1; }
-          }
-          
-          .animate-in {
-            animation-fill-mode: both;
-          }
-          
-          @keyframes fade-in {
-            from { opacity: 0; }
-            to { opacity: 1; }
-          }
-          
-          @keyframes slide-in-from-top {
-            from { transform: translateY(-10px); opacity: 0; }
-            to { transform: translateY(0); opacity: 1; }
-          }
-          
-          @keyframes zoom-in {
-            from { transform: scale(0.95); opacity: 0; }
-            to { transform: scale(1); opacity: 1; }
-          }
-          
-          .fade-in-0 { animation: fade-in 0.2s ease-out; }
-          .slide-in-from-top-2 { animation: slide-in-from-top 0.2s ease-out; }
-          .zoom-in-95 { animation: zoom-in 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
-          
-          .duration-200 { animation-duration: 200ms; }
-          .duration-300 { animation-duration: 300ms; }
-        `}</style>
         </div>
       </SidebarProvider>
     </AppProvider>
+  );
+};
+
+// Auth Routes Component
+const AuthRoutes: React.FC = () => {
+  const { state } = useAuth();
+  
+  if (state.loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+      </div>
+    );
+  }
+  
+  // If already authenticated, redirect to dashboard
+  if (state.isAuthenticated) {
+    return <Navigate to="/dashboard" replace />;
+  }
+  
+  return (
+    <Routes>
+      <Route path="/login" element={<Login />} />
+      <Route path="/signup" element={<Signup />} />
+      <Route path="*" element={<Navigate to="/login" replace />} />
+    </Routes>
+  );
+};
+
+// Main App Content
+const AppContent: React.FC = () => {
+  const { state } = useAuth();
+  
+  console.log('AppContent: Current auth state:', state);
+  
+  // Show loading while determining auth state
+  if (state.loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+      </div>
+    );
+  }
+  
+  return (
+    <Routes>
+      {/* Auth routes (login/signup) - only show if not authenticated */}
+      <Route path="/login" element={
+        state.isAuthenticated ? 
+          <Navigate to="/dashboard" replace /> : 
+          <Login />
+      } />
+      <Route path="/signup" element={
+        state.isAuthenticated ? 
+          <Navigate to="/dashboard" replace /> : 
+          <Signup />
+      } />
+      
+      {/* Protected dashboard route */}
+      <Route path="/dashboard" element={
+        <ProtectedRoute>
+          <DashboardLayout />
+        </ProtectedRoute>
+      } />
+      
+      {/* Default redirect */}
+      <Route path="/" element={
+        state.isAuthenticated ? 
+          <Navigate to="/dashboard" replace /> : 
+          <Navigate to="/login" replace />
+      } />
+      
+      {/* Catch all route */}
+      <Route path="*" element={
+        state.isAuthenticated ? 
+          <Navigate to="/dashboard" replace /> : 
+          <Navigate to="/login" replace />
+      } />
+    </Routes>
   );
 };
 
@@ -150,7 +189,11 @@ function App() {
   return (
     <QueryProvider>
       <AuthProvider>
-        <AppContent />
+        <Router>
+          <AppContent />
+          {/* Debug panel - remove in production */}
+          {process.env.NODE_ENV === 'development' && <AuthStateDebugger />}
+        </Router>
       </AuthProvider>
     </QueryProvider>
   );

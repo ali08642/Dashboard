@@ -1,7 +1,7 @@
-import React, { createContext, useContext, useReducer, ReactNode, useCallback, useEffect } from 'react';
+import React, { createContext, useReducer, ReactNode, useCallback, useEffect } from 'react';
 
 interface Admin {
-  id: number;
+  id: string; // UUID from Supabase Auth
   email: string;
   name: string;
   status: string;
@@ -67,7 +67,7 @@ const authReducer = (state: AuthState, action: AuthAction): AuthState => {
   }
 };
 
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
+export const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [state, dispatch] = useReducer(authReducer, initialState);
@@ -88,17 +88,23 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }, []);
 
   const login = useCallback(async (email: string, password: string): Promise<boolean> => {
+    console.log('AuthContext: Starting login process');
     dispatch({ type: 'LOGIN_START' });
     
     try {
       const { authApi } = await import('../utils/api');
+      console.log('AuthContext: Calling auth API');
       const admin = await authApi.login(email, password);
+      console.log('AuthContext: Got admin data:', admin);
+      
       localStorage.setItem('admin', JSON.stringify(admin));
       dispatch({ type: 'LOGIN_SUCCESS', payload: admin });
+      console.log('AuthContext: Login success, state updated, isAuthenticated should now be true');
       return true;
     } catch (error) {
+      console.error('AuthContext: Login error:', error);
       dispatch({ type: 'LOGIN_FAILURE' });
-      return false;
+      throw error; // Re-throw the error so Login component can handle it
     }
   }, []);
 
@@ -118,10 +124,3 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   );
 };
 
-export const useAuth = (): AuthContextType => {
-  const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
-  return context;
-};

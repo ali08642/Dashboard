@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Settings, Menu, Search, Bell, Mail, ChevronDown, LogOut, User } from 'lucide-react';
 import { useSidebar } from '../../context/SidebarContext';
-import { useAuth } from '../../context/AuthContext';
+import { useAuth } from '../../context/useAuth';
 
 interface TopBarProps {
   title: string;

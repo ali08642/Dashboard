@@ -111,6 +111,8 @@ export const AreasManagement: React.FC = () => {
     }
   };
 
+
+
   const cityOptions = [
     { value: '', label: 'All Cities' },
     ...state.allCities.map(city => ({
@@ -341,6 +343,8 @@ export const AreasManagement: React.FC = () => {
           </p>
         </div>
       </Modal>
+
+
     </div>
   );
 };

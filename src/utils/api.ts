@@ -2,7 +2,7 @@ import { getConfig } from './config';
 import type { Country, City, Area, ScrapeJob, Business, BusinessInteraction } from './types';
 
 interface Admin {
-  id: number;
+  id: string; // UUID from Supabase Auth
   email: string;
   name: string;
   status: string;
@@ -17,7 +17,7 @@ export class ApiError extends Error {
   }
 }
 
-export async function apiCall<T = any>(endpoint: string, options: RequestInit = {}): Promise<T> {
+export async function apiCall<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const config = getConfig();
   
   if (!config.supabaseUrl || !config.supabaseKey) {
@@ -145,6 +145,68 @@ export const webhookApi = {
     }
 
     return response.json();
+  },
+
+  createContextAreas: async (data: {
+    country_name: string;
+    country_ID: string;
+    city_name: string;
+    keywords: string[];
+  }): Promise<Area[]> => {
+    const config = getConfig();
+    const response = await fetch(config.contextAreasWebhook, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+
+    if (!response.ok) {
+      throw new ApiError(`Context areas webhook failed: ${response.status} ${response.statusText}`);
+    }
+
+    const rawResponse = await response.json();
+    console.log('🔍 Raw webhook response:', rawResponse);
+
+    // Handle different response formats from n8n
+    let areas: Area[] = [];
+    
+    if (Array.isArray(rawResponse)) {
+      // If response is directly an array of areas
+      areas = rawResponse;
+    } else if (rawResponse.areas && Array.isArray(rawResponse.areas)) {
+      // If response has an 'areas' property with the array
+      areas = rawResponse.areas;
+    } else if (rawResponse[0] && rawResponse[0].areas) {
+      // If response is an array with first item containing areas
+      areas = rawResponse[0].areas;
+    } else if (rawResponse[0] && Array.isArray(rawResponse[0])) {
+      // If response is nested array
+      areas = rawResponse[0];
+    } else {
+      // Log the structure for debugging
+      console.error('❌ Unexpected response structure:', rawResponse);
+      throw new ApiError(`Unexpected response format from context areas webhook. Expected array of areas, got: ${JSON.stringify(rawResponse)}`);
+    }
+
+    // Ensure each area has the required properties
+    const validatedAreas = areas.map((area: any, index: number) => {
+      if (!area.name) {
+        console.warn(`⚠️ Area at index ${index} missing name:`, area);
+      }
+      
+      return {
+        id: area.id || Math.random(), // Temporary ID if not provided
+        name: area.name || `Area ${index + 1}`,
+        city_id: area.city_id || parseInt(data.country_ID), // Use provided city info as fallback
+        last_scraped_at: area.last_scraped_at || null,
+        created_at: area.created_at || new Date().toISOString(),
+        // Include any additional properties that might be present
+        ...area
+      };
+    });
+
+    console.log('✅ Processed areas:', validatedAreas);
+    return validatedAreas;
   }
 };
 
@@ -315,7 +377,7 @@ export const businessApi = {
       })
     }),
 
-  export: (filters?: any): Promise<Blob> =>
+  export: (filters?: Record<string, string | number | boolean>): Promise<Blob> =>
     fetch(`${getConfig().supabaseUrl}/rest/v1/rpc/export_businesses`, {
       method: 'POST',
       headers: {
@@ -409,27 +471,188 @@ export const businessInteractionApi = {
 
 // Authentication API functions
 export const authApi = {
-  login: async (email: string, password: string): Promise<Admin> => {
-    // For demo purposes, we'll simulate authentication
-    // In a real app, this would validate against the database
-    if (password === 'admin123') {
-      try {
-        const admins = await apiCall<Admin[]>(`admins?email=eq.${encodeURIComponent(email)}&select=*`);
-        if (admins && admins.length > 0) {
-          return admins[0];
-        }
-      } catch (error) {
-        console.error('Admin lookup failed:', error);
+  signup: async (name: string, email: string, password: string): Promise<void> => {
+    try {
+      console.log('Attempting signup for:', email);
+      const { supabase } = await import('./supabase');
+      
+      // Create auth user in Supabase
+      console.log('Creating Supabase auth user...');
+      
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email,
+        password,
+      });
+      console.log('Auth signup response:', { authData, authError });
+
+      if (authError) {
+        console.error('Auth signup error:', authError);
+        throw new ApiError(authError.message, 400);
       }
+      if (!authData.user) {
+        console.error('No user returned from auth signup');
+        throw new ApiError('Failed to create user account', 400);
+      }
+
+      // Create admin record using the auth user's UUID
+      console.log('Creating admin record for user:', authData.user.id);
+      const adminData = {
+        id: authData.user.id, // Use UUID from auth
+        email: email,
+        name: name,
+        status: 'active',
+        supported_keywords: [],
+        max_concurrent_jobs: 3
+      };
+
+      const { data: insertedAdmin, error: adminError } = await supabase
+        .from('admins')
+        .insert(adminData)
+        .select()
+        .single();
+      console.log('Admin creation response:', { insertedAdmin, adminError });
+
+      if (adminError) {
+        console.error('Admin creation error:', adminError);
+        // If admin creation fails, we should clean up the auth user
+        // But for now, we'll just throw an error
+        throw new ApiError(`Failed to create admin profile: ${adminError.message}`, 400);
+      }
+
+      console.log('Signup successful for:', email, { 
+        userConfirmed: authData.user?.email_confirmed_at ? 'confirmed' : 'pending'
+      });
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      console.error('Signup failed:', error);
+      throw new ApiError('Signup failed. Please try again.', 400);
     }
-    throw new ApiError('Invalid credentials', 401);
+  },
+
+  login: async (email: string, password: string): Promise<Admin> => {
+    try {
+      console.log('Attempting login for:', email);
+      const { supabase } = await import('./supabase');
+      
+      // Sign in with Supabase Auth
+      console.log('Calling Supabase auth...');
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+      console.log('Auth response:', { 
+        user: authData?.user?.id, 
+        email: authData?.user?.email,
+        emailConfirmed: authData?.user?.email_confirmed_at,
+        error: authError?.message 
+      });
+
+      if (authError) {
+        console.error('Auth error:', authError);
+        
+        // Check if it's an email verification issue
+        if (authError.message.toLowerCase().includes('email not confirmed') || 
+            authError.message.toLowerCase().includes('signup requires email verification')) {
+          throw new ApiError('Please verify your email address before logging in. Check your inbox for a verification link.', 401);
+        }
+        
+        // Check for invalid credentials
+        if (authError.message.toLowerCase().includes('invalid') && 
+            authError.message.toLowerCase().includes('credentials')) {
+          throw new ApiError('Invalid email or password. Please check your credentials and try again.', 401);
+        }
+        
+        throw new ApiError(authError.message, 401);
+      }
+      
+      if (!authData.user) {
+        console.error('No user returned from auth');
+        throw new ApiError('No user returned from auth', 401);
+      }
+
+      // Check if user's email is confirmed (but allow login anyway for demo purposes)
+      if (!authData.user.email_confirmed_at) {
+        console.warn('User email not confirmed, but allowing login for demo purposes');
+      }
+
+      // Get the admin record using the auth UUID
+      console.log('Getting admin record for user:', authData.user.id);
+      console.log('User object:', {
+        id: authData.user.id,
+        email: authData.user.email,
+        confirmed: authData.user.email_confirmed_at,
+        created: authData.user.created_at
+      });
+      
+      const { data: adminData, error: adminError } = await supabase
+        .from('admins')
+        .select('*')
+        .eq('id', authData.user.id)
+        .single();
+      console.log('Admin data response:', { 
+        adminData, 
+        adminError,
+        queryUserId: authData.user.id
+      });
+
+      if (adminError) {
+        console.error('Admin lookup error:', adminError);
+        
+        // If admin record doesn't exist, try to create it
+        if (adminError.code === 'PGRST116' || adminError.message.includes('No rows returned')) {
+          console.log('Admin record not found, attempting to create one...');
+          try {
+            const newAdminData = {
+              id: authData.user.id,
+              email: authData.user.email || email,
+              name: authData.user.user_metadata?.name || authData.user.email?.split('@')[0] || 'User',
+              status: 'active',
+              supported_keywords: [],
+              max_concurrent_jobs: 3
+            };
+            
+            const { data: createdAdmin, error: createError } = await supabase
+              .from('admins')
+              .insert(newAdminData)
+              .select()
+              .single();
+              
+            if (createError) {
+              console.error('Failed to create admin record:', createError);
+              throw new ApiError(`Admin record not found and could not be created: ${createError.message}`, 404);
+            }
+            
+            console.log('Created admin record:', createdAdmin);
+            return createdAdmin as Admin;
+          } catch (createErr) {
+            console.error('Error creating admin record:', createErr);
+            throw new ApiError('Admin record not found and could not be created', 404);
+          }
+        } else {
+          throw new ApiError(adminError.message, 401);
+        }
+      }
+      
+      if (!adminData) {
+        console.error('No admin record found after successful query');
+        throw new ApiError('Admin record not found', 404);
+      }
+
+      console.log('Login successful, returning admin data');
+      return adminData as Admin;
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      console.error('Login failed:', error);
+      throw new ApiError('Login failed', 401);
+    }
   },
 
   getAdmins: (): Promise<Admin[]> =>
     apiCall('admins?select=*&order=name.asc'),
 
   getAdminById: (id: number): Promise<Admin> =>
-    apiCall(`admins?id=eq.${id}&select=*`).then(admins => {
+    apiCall(`admins?id=eq.${id}&select=*`).then((result) => {
+      const admins = result as Admin[];
       if (admins && admins.length > 0) {
         return admins[0];
       }
@@ -442,9 +665,10 @@ export const testConnections = async (): Promise<{
   database: boolean;
   citiesWebhook: boolean;
   areasWebhook: boolean;
+  contextAreasWebhook: boolean;
 }> => {
   const config = getConfig();
-  const results = { database: false, citiesWebhook: false, areasWebhook: false };
+  const results = { database: false, citiesWebhook: false, areasWebhook: false, contextAreasWebhook: false };
 
   // Test database connection
   if (config.supabaseUrl && config.supabaseKey) {
@@ -481,6 +705,20 @@ export const testConnections = async (): Promise<{
       results.areasWebhook = response.ok;
     } catch (error) {
       console.error('Areas webhook test failed:', error);
+    }
+  }
+
+  // Test context areas webhook
+  if (config.contextAreasWebhook) {
+    try {
+      const response = await fetch(config.contextAreasWebhook, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ test: true })
+      });
+      results.contextAreasWebhook = response.ok;
+    } catch (error) {
+      console.error('Context areas webhook test failed:', error);
     }
   }
 

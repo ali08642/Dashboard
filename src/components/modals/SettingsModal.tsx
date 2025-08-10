@@ -18,7 +18,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     supabaseUrl: '',
     supabaseKey: '',
     citiesWebhook: '',
-    areasWebhook: ''
+    areasWebhook: '',
+    contextAreasWebhook: ''
   });
   const [connectionStatus, setConnectionStatus] = useState<string>('Click "Test Connections" to verify all endpoints');
   const [statusColor, setStatusColor] = useState('#86868b');
@@ -32,7 +33,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         supabaseUrl: config.supabaseUrl,
         supabaseKey: config.supabaseKey,
         citiesWebhook: config.citiesWebhook,
-        areasWebhook: config.areasWebhook
+        areasWebhook: config.areasWebhook,
+        contextAreasWebhook: config.contextAreasWebhook
       });
     }
   }, [isOpen]);
@@ -57,6 +59,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       }
       if (formData.areasWebhook) {
         tests.push(`Areas Webhook: ${results.areasWebhook ? '✓' : '✗'}`);
+      }
+      if (formData.contextAreasWebhook) {
+        tests.push(`Context Areas Webhook: ${results.contextAreasWebhook ? '✓' : '✗'}`);
       }
 
       if (tests.length === 0) {
@@ -197,6 +202,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
           onChange={(e) => setFormData({ ...formData, areasWebhook: e.target.value })}
           placeholder="https://your-n8n-instance.com/webhook/areas-endpoint"
           hint="n8n webhook endpoint for areas data population"
+        />
+
+        <Input
+          label="Context Areas Creation Webhook URL"
+          type="url"
+          value={formData.contextAreasWebhook}
+          onChange={(e) => setFormData({ ...formData, contextAreasWebhook: e.target.value })}
+          placeholder="https://your-n8n-instance.com/webhook/create-context-areas"
+          hint="n8n webhook endpoint for context-based areas creation with keywords"
         />
 
         <div>
