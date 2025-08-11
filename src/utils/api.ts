@@ -111,6 +111,10 @@ export const areaApi = {
 export const webhookApi = {
   initializeCities: async (countryId: number, forceRefresh: boolean, keywords: string[]): Promise<City[]> => {
     const config = getConfig();
+    
+    console.log('🌐 Calling cities webhook:', config.citiesWebhook);
+    console.log('📤 Request payload:', { country_id: countryId, action: 'populate_cities', force_refresh: forceRefresh, target_keywords: keywords });
+    
     const response = await fetch(config.citiesWebhook, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -122,11 +126,29 @@ export const webhookApi = {
       })
     });
 
+    console.log('📡 Response status:', response.status, response.statusText);
+    console.log('📋 Response headers:', Object.fromEntries(response.headers.entries()));
+
     if (!response.ok) {
       throw new ApiError(`Cities webhook failed: ${response.status} ${response.statusText}`);
     }
 
-    return response.json();
+    // Check if response has content before parsing JSON
+    const responseText = await response.text();
+    console.log('🔍 Cities webhook raw response:', responseText);
+    
+    if (!responseText || responseText.trim() === '') {
+      throw new ApiError('Cities webhook returned empty response');
+    }
+
+    try {
+      const data = JSON.parse(responseText);
+      console.log('✅ Cities webhook parsed data:', data);
+      return data;
+    } catch (error) {
+      console.error('❌ Failed to parse cities webhook response:', responseText);
+      throw new ApiError(`Invalid JSON response from cities webhook: ${error.message}`);
+    }
   },
 
   initializeAreas: async (cityId: number): Promise<Area[]> => {

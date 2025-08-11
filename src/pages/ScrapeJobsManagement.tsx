@@ -6,7 +6,7 @@ import { Button } from '../components/common/Button';
 import { Input } from '../components/common/Input';
 import { Select } from '../components/common/Select';
 import { Modal } from '../components/common/Modal';
-import { countryApi, scrapeJobApi } from '../utils/api';
+import { countryApi, cityApi, scrapeJobApi, webhookApi } from '../utils/api';
 import type { Country, City, Area, ScrapeJob } from '../utils/types';
 
 export const ScrapeJobsManagement: React.FC = () => {
@@ -37,18 +37,23 @@ export const ScrapeJobsManagement: React.FC = () => {
   const loadInitialData = useCallback(async () => {
     setLoading(true);
     try {
+      console.log('🚀 Loading scraping jobs page data...');
+      
       const [countriesData, jobsData] = await Promise.all([
         countryApi.getAll(),
         scrapeJobApi.getAll()
       ]);
+      
+      console.log(`✅ Loaded ${countriesData.length} countries and ${jobsData.length} jobs`);
+      
       setCountries(countriesData);
       setJobs(jobsData);
       // Also update the context state like other pages
       dispatch({ type: 'SET_ALL_COUNTRIES', payload: countriesData });
-    } catch (error) {
-      console.error('Failed to load initial data:', error);
-      showNotification('success', 'Loading Failed', 'Failed to load data', 'Please check your database configuration.');
-      setTimeout(hideNotification, 3000);
+      
+    } catch (error: any) {
+      console.error('❌ Failed to load initial data:', error.message);
+      showNotification('error', 'Loading Failed', 'Failed to load data', error.message);
     } finally {
       setLoading(false);
     }
@@ -98,11 +103,48 @@ export const ScrapeJobsManagement: React.FC = () => {
     if (countryId) {
       setLoadingCities(true);
       try {
+        console.log(`🏙️ Loading cities for country ID: ${countryId}`);
+        
+        // Check configuration first
+        const { getConfig } = await import('../utils/config');
+        const config = getConfig();
+        console.log('🔧 Config check:');
+        console.log('  - Supabase URL:', config.supabaseUrl ? 'SET' : 'MISSING');
+        console.log('  - Supabase Key:', config.supabaseKey ? 'SET' : 'MISSING');
+        
+        if (!config.supabaseUrl || !config.supabaseKey) {
+          throw new Error('Supabase configuration is missing. Please set up your Supabase URL and API key in Settings.');
+        }
+        
+        // Now try the API function
         const citiesData = await scrapeJobApi.getCitiesByCountry(countryId);
+        console.log(`✅ API function returned ${citiesData?.length || 0} cities:`, citiesData);
+        
         setCities(citiesData);
+        
+        if (!citiesData || citiesData.length === 0) {
+          // Let's also check if ANY cities exist in the database at all
+          console.log('🔍 No cities found for this country. Checking if ANY cities exist...');
+          try {
+            const allCities = await cityApi.getAll();
+            console.log(`📊 Total cities in database: ${allCities.length}`);
+            if (allCities.length > 0) {
+              console.log('🏙️ All cities:', allCities);
+              console.log('🔗 Country IDs in cities:', [...new Set(allCities.map(c => c.country_id))]);
+              console.log('🎯 Looking for country_id:', countryId);
+            }
+          } catch (err) {
+            console.error('❌ Failed to fetch all cities:', err);
+          }
+          
+          showNotification('info', 'No Cities Found', 'Database is empty', `No cities found for country ID ${countryId}. Check console for database details.`);
+          setTimeout(hideNotification, 5000);
+        } else {
+          console.log(`✅ Successfully loaded ${citiesData.length} cities`);
+        }
       } catch (error) {
         console.error('Failed to load cities:', error);
-        showNotification('success', 'Loading Failed', 'Failed to load cities', 'Please check your database configuration.');
+        showNotification('error', 'Loading Failed', 'Failed to load cities', 'Please check your database configuration and network connection.');
         setTimeout(hideNotification, 3000);
       } finally {
         setLoadingCities(false);
@@ -120,11 +162,21 @@ export const ScrapeJobsManagement: React.FC = () => {
     if (cityId) {
       setLoadingAreas(true);
       try {
+        console.log('Loading areas for city ID:', cityId);
         const areasData = await scrapeJobApi.getAreasByCity(cityId);
+        console.log('Areas loaded from database:', areasData);
+        
         setAreas(areasData);
+        
+        if (!areasData || areasData.length === 0) {
+          showNotification('info', 'No Areas Found', 'Database is empty', `No business areas found for the selected city. You may need to run the "Initialize Areas" workflow from the Dashboard first.`);
+          setTimeout(hideNotification, 5000);
+        } else {
+          console.log(`Successfully loaded ${areasData.length} areas`);
+        }
       } catch (error) {
         console.error('Failed to load areas:', error);
-        showNotification('success', 'Loading Failed', 'Failed to load areas', 'Please check your database configuration.');
+        showNotification('error', 'Loading Failed', 'Failed to load areas', 'Please check your database configuration and network connection.');
         setTimeout(hideNotification, 3000);
       } finally {
         setLoadingAreas(false);
@@ -137,6 +189,8 @@ export const ScrapeJobsManagement: React.FC = () => {
     const areaId = value ? parseInt(value) : null;
     setSelectedAreaId(areaId);
   };
+
+
 
   const handleCreateJob = async () => {
     if (!selectedAreaId || !keyword.trim()) {
@@ -471,6 +525,8 @@ export const ScrapeJobsManagement: React.FC = () => {
         }
       >
         <div className="space-y-8">
+
+
           {/* Job Creation Flow Guide */}
           <div className="bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200/60 rounded-2xl p-6">
             <h4 className="font-semibold text-blue-900 mb-4 flex items-center gap-2">

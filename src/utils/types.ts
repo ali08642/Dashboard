@@ -58,7 +58,7 @@ export interface ScrapeJob {
   id: number;
   area_id: number;
   keyword: string;
-  assigned_to?: number;
+  assigned_to?: string; // Changed from number to string (UUID)
   status: 'pending' | 'running' | 'completed' | 'failed';
   logs?: any;
   error_message?: string;
@@ -97,7 +97,7 @@ export interface Business {
   last_contacted_at?: string;
   next_followup_at?: string;
   notes?: string;
-  assigned_marketer?: number;
+  assigned_marketer?: string; // Changed from number to string (UUID)
   created_at: string;
   updated_at: string;
   areas?: {

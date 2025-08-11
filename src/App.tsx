@@ -150,7 +150,13 @@ function App() {
   return (
     <QueryProvider>
       <AuthProvider>
+<<<<<<< Updated upstream
         <AppContent />
+=======
+        <Router>
+          <AppContent />
+        </Router>
+>>>>>>> Stashed changes
       </AuthProvider>
     </QueryProvider>
   );
