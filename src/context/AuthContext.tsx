@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useReducer, ReactNode, useCallback, useEffect } from 'react';
 
 interface Admin {
-  id: number;
+  id: string; // UUID from Supabase Auth
   email: string;
   name: string;
   status: string;
@@ -98,7 +98,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return true;
     } catch (error) {
       dispatch({ type: 'LOGIN_FAILURE' });
-      return false;
+      // Re-throw the error so the Login component can handle it
+      throw error;
     }
   }, []);
 

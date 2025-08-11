@@ -1,23 +1,44 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Button } from '../components/common/Button';
 import { Input } from '../components/common/Input';
 
 export const Login: React.FC = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [successMessage, setSuccessMessage] = useState('');
   const { login } = useAuth();
+
+  // Check for success message from signup
+  useEffect(() => {
+    if (location.state?.message) {
+      setSuccessMessage(location.state.message);
+      // Clear the message after 5 seconds
+      setTimeout(() => setSuccessMessage(''), 5000);
+    }
+  }, [location.state]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setLoading(true);
 
-    const success = await login(email, password);
-    if (!success) {
-      setError('Invalid email or password');
+    try {
+      const success = await login(email, password);
+      if (success) {
+        console.log('✅ Login successful, navigating to dashboard...');
+        navigate('/dashboard');
+      } else {
+        setError('Invalid email or password');
+      }
+    } catch (err: any) {
+      console.error('❌ Login error:', err);
+      setError(err.message || 'Login failed. Please try again.');
     }
     setLoading(false);
   };
@@ -74,6 +95,12 @@ export const Login: React.FC = () => {
             </div>
           </div>
 
+          {successMessage && (
+            <div className="bg-green-50 border border-green-200 text-green-600 px-4 py-3 rounded-md text-sm">
+              {successMessage}
+            </div>
+          )}
+
           {error && (
             <div className="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-md text-sm">
               {error}
@@ -105,6 +132,19 @@ export const Login: React.FC = () => {
           <div className="text-center">
             <p className="text-xs text-gray-500">
               Default password: admin123
+            </p>
+          </div>
+
+          <div className="text-center">
+            <p className="text-sm text-gray-600">
+              Don't have an account?{' '}
+              <button
+                type="button"
+                onClick={() => navigate('/signup')}
+                className="font-medium text-indigo-600 hover:text-indigo-500"
+              >
+                Sign up
+              </button>
             </p>
           </div>
         </form>

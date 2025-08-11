@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AppProvider } from './context/AppContext';
 import { SidebarProvider } from './context/SidebarContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -16,11 +17,34 @@ import { PlaceholderPage } from './pages/PlaceholderPage';
 import { Analytics } from './pages/Analytics';
 import { BusinessInteractions } from './pages/BusinessInteractions';
 import { Login } from './pages/Login';
+import { Signup } from './pages/Signup';
 
-const AppContent: React.FC = () => {
+// Protected Route component
+const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { state } = useAuth();
+
+  if (state.loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!state.isAuthenticated) {
+    return <Navigate to="/login" replace />;
+  }
+
+  return <>{children}</>;
+};
+
+// Dashboard Layout wrapper
+const DashboardLayout: React.FC = () => {
   const [currentSection, setCurrentSection] = useState('dashboard');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const { state } = useAuth();
   const { prefetchCountries, prefetchBusinessStats, prefetchBusinesses } = usePrefetch();
 
   // Prefetch data for likely navigation targets
@@ -60,21 +84,6 @@ const AppContent: React.FC = () => {
         return <Dashboard />;
     }
   };
-
-  if (state.loading) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!state.isAuthenticated) {
-    return <Login />;
-  }
 
   return (
     <AppProvider>
@@ -143,6 +152,27 @@ const AppContent: React.FC = () => {
         </div>
       </SidebarProvider>
     </AppProvider>
+  );
+};
+
+// Router component
+const AppContent: React.FC = () => {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route path="/signup" element={<Signup />} />
+        <Route
+          path="/dashboard"
+          element={
+            <ProtectedRoute>
+              <DashboardLayout />
+            </ProtectedRoute>
+          }
+        />
+        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+      </Routes>
+    </BrowserRouter>
   );
 };
 

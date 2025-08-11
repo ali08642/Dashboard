@@ -2,7 +2,7 @@ import { getConfig } from './config';
 import type { Country, City, Area, ScrapeJob, Business, BusinessInteraction } from './types';
 
 interface Admin {
-  id: number;
+  id: string; // UUID from Supabase Auth
   email: string;
   name: string;
   status: string;
@@ -38,7 +38,18 @@ export async function apiCall<T = any>(endpoint: string, options: RequestInit = 
   });
 
   if (!response.ok) {
-    throw new ApiError(`API call failed: ${response.status} ${response.statusText}`, response.status);
+    let errorMessage = `API call failed: ${response.status} ${response.statusText}`;
+    try {
+      const errorBody = await response.text();
+      console.error('❌ API Error Response:', errorBody);
+      if (errorBody) {
+        const parsedError = JSON.parse(errorBody);
+        errorMessage += ` - ${parsedError.message || parsedError.hint || errorBody}`;
+      }
+    } catch (parseError) {
+      // If we can't parse the error, just use the status
+    }
+    throw new ApiError(errorMessage, response.status);
   }
 
   return response.json();
@@ -147,7 +158,7 @@ export const webhookApi = {
       return data;
     } catch (error) {
       console.error('❌ Failed to parse cities webhook response:', responseText);
-      throw new ApiError(`Invalid JSON response from cities webhook: ${error.message}`);
+      throw new ApiError(`Invalid JSON response from cities webhook: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   },
 
@@ -452,19 +463,146 @@ export const businessInteractionApi = {
 // Authentication API functions
 export const authApi = {
   login: async (email: string, password: string): Promise<Admin> => {
-    // For demo purposes, we'll simulate authentication
-    // In a real app, this would validate against the database
-    if (password === 'admin123') {
-      try {
-        const admins = await apiCall<Admin[]>(`admins?email=eq.${encodeURIComponent(email)}&select=*`);
-        if (admins && admins.length > 0) {
-          return admins[0];
-        }
-      } catch (error) {
-        console.error('Admin lookup failed:', error);
+    try {
+      console.log('🔐 Starting login process for:', email);
+
+      // Import Supabase client dynamically
+      const { createClient } = await import('@supabase/supabase-js');
+      const config = getConfig();
+      
+      if (!config.supabaseUrl || !config.supabaseKey) {
+        throw new ApiError('Supabase configuration is missing', 500);
       }
+
+      const supabase = createClient(config.supabaseUrl, config.supabaseKey);
+
+      // Step 1: Authenticate with Supabase Auth
+      console.log('👤 Authenticating with Supabase Auth...');
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        email: email,
+        password: password,
+      });
+
+      if (authError) {
+        console.error('❌ Supabase Auth error:', authError);
+        if (authError.message.includes('Invalid login credentials')) {
+          throw new ApiError('Invalid email or password', 401);
+        }
+        if (authError.message.includes('Email not confirmed')) {
+          throw new ApiError('Please check your email and confirm your account before logging in', 401);
+        }
+        throw new ApiError(`Authentication failed: ${authError.message}`, 401);
+      }
+
+      if (!authData.user) {
+        throw new ApiError('Authentication failed: No user returned', 401);
+      }
+
+      console.log('✅ Auth successful for user ID:', authData.user.id);
+
+      // Step 2: Get admin record using the Auth user's UUID
+      console.log('📋 Looking up admin record...');
+      const admins = await apiCall<Admin[]>(`admins?id=eq.${authData.user.id}&select=*`);
+      
+      if (!admins || admins.length === 0) {
+        // If admin record doesn't exist, create it
+        console.log('⚠️ Admin record not found, creating one...');
+        const newAdmin = await apiCall<Admin[]>('admins', {
+          method: 'POST',
+          body: JSON.stringify({
+            id: authData.user.id,
+            name: authData.user.user_metadata?.name || authData.user.email?.split('@')[0] || 'User',
+            email: authData.user.email,
+            status: 'active',
+            supported_keywords: [],
+            max_concurrent_jobs: 3
+          })
+        });
+        
+        if (newAdmin && newAdmin.length > 0) {
+          console.log('✅ Admin record created:', newAdmin[0]);
+          return newAdmin[0];
+        }
+        
+        throw new ApiError('Failed to create admin record', 500);
+      }
+
+      console.log('✅ Admin record found:', admins[0]);
+      return admins[0];
+
+    } catch (error) {
+      console.error('❌ Login failed:', error);
+      if (error instanceof ApiError) {
+        throw error;
+      }
+      throw new ApiError('Login failed. Please try again.', 500);
     }
-    throw new ApiError('Invalid credentials', 401);
+  },
+
+  signup: async (userData: {
+    name: string;
+    email: string;
+    password: string;
+  }): Promise<void> => {
+    try {
+      console.log('🚀 Starting signup process for:', userData.email);
+
+      // Import Supabase client dynamically to avoid circular dependencies
+      const { createClient } = await import('@supabase/supabase-js');
+      const config = getConfig();
+      
+      if (!config.supabaseUrl || !config.supabaseKey) {
+        throw new ApiError('Supabase configuration is missing', 500);
+      }
+
+      const supabase = createClient(config.supabaseUrl, config.supabaseKey);
+
+      // Step 1: Create user in Supabase Auth
+      console.log('👤 Creating Supabase Auth user...');
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email: userData.email,
+        password: userData.password,
+      });
+
+      if (authError) {
+        console.error('❌ Supabase Auth error:', authError);
+        throw new ApiError(`Failed to create auth user: ${authError.message}`, 400);
+      }
+
+      if (!authData.user) {
+        throw new ApiError('Failed to create auth user: No user returned', 400);
+      }
+
+      console.log('✅ Auth user created with ID:', authData.user.id);
+
+      // Step 2: Create admin record using the Auth user's UUID
+      console.log('📝 Creating admin record with UUID:', authData.user.id);
+      
+      const adminData = {
+        id: authData.user.id, // Use the UUID from Supabase Auth
+        name: userData.name,
+        email: userData.email,
+        status: 'active',
+        supported_keywords: [],
+        max_concurrent_jobs: 3
+      };
+
+      console.log('📋 Admin data being sent:', adminData);
+
+      const newAdmin = await apiCall<Admin[]>('admins', {
+        method: 'POST',
+        body: JSON.stringify(adminData)
+      });
+
+      console.log('✅ Admin record created successfully:', newAdmin);
+
+    } catch (error) {
+      console.error('❌ Signup failed:', error);
+      if (error instanceof ApiError) {
+        throw error;
+      }
+      throw new ApiError('Failed to create account. Please try again.', 500);
+    }
   },
 
   getAdmins: (): Promise<Admin[]> =>
