@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Zap, Building2, RotateCcw, ArrowLeft, MapPin } from 'lucide-react';
+import { Zap, Building2, RotateCcw, ArrowLeft, MapPin, Sparkles } from 'lucide-react';
+import { ContextAreasModal } from '../components/modals/ContextAreasModal';
 import { useApp } from '../context/AppContext';
 import { WorkflowSteps } from '../components/workflow/WorkflowSteps';
 import { CountrySearch } from '../components/workflow/CountrySearch';
@@ -10,7 +11,8 @@ import type { Country } from '../utils/types';
 
 export const Dashboard: React.FC = () => {
   const { state, dispatch, showNotification, hideNotification } = useApp();
-  const [loading, setLoading] = useState({ cities: false, areas: false });
+  const [loading, setLoading] = useState({ cities: false, areas: false, contextAreas: false });
+  const [isContextModalOpen, setIsContextModalOpen] = useState(false);
 
   useEffect(() => {
     loadCountries();
@@ -124,6 +126,54 @@ export const Dashboard: React.FC = () => {
       alert('Failed to initialize areas: ' + error.message);
     } finally {
       setLoading({ ...loading, areas: false });
+    }
+  };
+
+  const handleContextAreasSubmit = async (keywords: string[]) => {
+    if (!state.selectedCountry || !state.selectedCityName) {
+      alert('Missing country or city information');
+      return;
+    }
+
+    setLoading({ ...loading, contextAreas: true });
+    
+    try {
+      const contextData = {
+        country_name: state.selectedCountry.name,
+        country_ID: state.selectedCountry.id.toString(),
+        city_name: state.selectedCityName,
+        keywords: keywords
+      };
+
+      const newAreas = await webhookApi.createContextAreas(contextData);
+      
+      if (Array.isArray(newAreas) && newAreas.length > 0) {
+        // Add new areas to existing ones
+        const updatedAreas = [...state.areas, ...newAreas];
+        dispatch({ type: 'SET_AREAS', payload: updatedAreas });
+        
+        showNotification(
+          'success',
+          'Context Areas Generated',
+          'New areas added successfully',
+          `Generated ${newAreas.length} new business areas based on your keywords.`
+        );
+        setTimeout(hideNotification, 3000);
+        
+        setIsContextModalOpen(false);
+      } else {
+        throw new Error('No context areas generated');
+      }
+    } catch (error: any) {
+      showNotification(
+        'error',
+        'Context Areas Failed',
+        'Failed to generate areas',
+        error.message || 'Please check your webhook configuration.'
+      );
+      setTimeout(hideNotification, 3000);
+    } finally {
+      setLoading({ ...loading, contextAreas: false });
     }
   };
 
@@ -297,9 +347,19 @@ export const Dashboard: React.FC = () => {
                     {state.areas.length} areas
                   </span>
                 </div>
-                <div className="flex gap-3">
+                <div className="flex gap-3 flex-wrap">
                   <Button variant="secondary" onClick={backToCities} icon={<ArrowLeft className="w-4 h-4" />}>
                     Back to Cities
+                  </Button>
+                  <Button 
+                    variant="primary"
+                    onClick={() => setIsContextModalOpen(true)}
+                    disabled={loading.contextAreas}
+                    loading={loading.contextAreas}
+                    icon={<Sparkles className="w-4 h-4" />}
+                    className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white border-0"
+                  >
+                    Create Context-Based Areas
                   </Button>
                   <Button variant="secondary" onClick={resetWorkflow} icon={<RotateCcw className="w-4 h-4" />}>
                     Start New Workflow
@@ -355,6 +415,16 @@ export const Dashboard: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Context Areas Modal */}
+      <ContextAreasModal
+        isOpen={isContextModalOpen}
+        onClose={() => setIsContextModalOpen(false)}
+        onSubmit={handleContextAreasSubmit}
+        countryName={state.selectedCountry?.name || ''}
+        cityName={state.selectedCityName || ''}
+        loading={loading.contextAreas}
+      />
     </div>
   );
 };

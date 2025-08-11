@@ -167,6 +167,26 @@ export const webhookApi = {
     }
 
     return response.json();
+  },
+
+  createContextAreas: async (data: {
+    country_name: string;
+    country_ID: string;
+    city_name: string;
+    keywords: string[];
+  }): Promise<Area[]> => {
+    const config = getConfig();
+    const response = await fetch(config.contextAreasWebhook, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+
+    if (!response.ok) {
+      throw new ApiError(`Context areas webhook failed: ${response.status} ${response.statusText}`);
+    }
+
+    return response.json();
   }
 };
 
@@ -464,9 +484,10 @@ export const testConnections = async (): Promise<{
   database: boolean;
   citiesWebhook: boolean;
   areasWebhook: boolean;
+  contextAreasWebhook: boolean;
 }> => {
   const config = getConfig();
-  const results = { database: false, citiesWebhook: false, areasWebhook: false };
+  const results = { database: false, citiesWebhook: false, areasWebhook: false, contextAreasWebhook: false };
 
   // Test database connection
   if (config.supabaseUrl && config.supabaseKey) {
@@ -503,6 +524,20 @@ export const testConnections = async (): Promise<{
       results.areasWebhook = response.ok;
     } catch (error) {
       console.error('Areas webhook test failed:', error);
+    }
+  }
+
+  // Test context areas webhook
+  if (config.contextAreasWebhook) {
+    try {
+      const response = await fetch(config.contextAreasWebhook, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ test: true })
+      });
+      results.contextAreasWebhook = response.ok;
+    } catch (error) {
+      console.error('Context areas webhook test failed:', error);
     }
   }
 

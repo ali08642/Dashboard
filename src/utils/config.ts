@@ -3,13 +3,15 @@ export const getConfig = (): {
   supabaseKey: string;
   citiesWebhook: string;
   areasWebhook: string;
+  contextAreasWebhook: string;
 } => {
   // Try to get from environment variables first
   const envConfig = {
     supabaseUrl: import.meta.env.VITE_SUPABASE_URL || '',
     supabaseKey: import.meta.env.VITE_SUPABASE_ANON_KEY || '',
     citiesWebhook: import.meta.env.VITE_CITIES_WEBHOOK_URL || 'https://your-n8n.com/webhook/populate-country',
-    areasWebhook: import.meta.env.VITE_AREAS_WEBHOOK_URL || 'https://your-n8n.com/webhook/3cbf8c56-f36c-4375-b211-bfac8c1d4e9a'
+    areasWebhook: import.meta.env.VITE_AREAS_WEBHOOK_URL || 'https://your-n8n.com/webhook/3cbf8c56-f36c-4375-b211-bfac8c1d4e9a',
+    contextAreasWebhook: import.meta.env.VITE_CONTEXT_AREAS_WEBHOOK_URL || 'https://your-n8n.com/webhook/create-context-areas'
   };
 
   // If environment variables are not set, try localStorage
