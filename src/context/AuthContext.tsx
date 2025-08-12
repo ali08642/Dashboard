@@ -5,6 +5,7 @@ interface Admin {
   email: string;
   name: string;
   status: string;
+  login_status?: string; // New login status field
   supported_keywords: string[];
   max_concurrent_jobs: number;
 }
@@ -103,10 +104,27 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   }, []);
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
+    // Set user to offline on logout
+    if (state.admin?.id) {
+      try {
+        const { apiCall } = await import('../utils/api');
+        await apiCall(`admins?id=eq.${state.admin.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            login_status: 'offline'
+          })
+        });
+        console.log('✅ User set to offline on logout');
+      } catch (error) {
+        console.error('❌ Failed to set user offline on logout:', error);
+        // Continue with logout even if this fails
+      }
+    }
+    
     localStorage.removeItem('admin');
     dispatch({ type: 'LOGOUT' });
-  }, []);
+  }, [state.admin?.id]);
 
   return (
     <AuthContext.Provider value={{

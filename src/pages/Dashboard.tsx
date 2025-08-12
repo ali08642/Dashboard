@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Zap, Building2, RotateCcw, ArrowLeft, MapPin, Sparkles } from 'lucide-react';
 import { ContextAreasModal } from '../components/modals/ContextAreasModal';
+import { GeneratedAreasModal } from '../components/modals/GeneratedAreasModal';
 import { useApp } from '../context/AppContext';
 import { WorkflowSteps } from '../components/workflow/WorkflowSteps';
 import { CountrySearch } from '../components/workflow/CountrySearch';
@@ -13,6 +14,19 @@ export const Dashboard: React.FC = () => {
   const { state, dispatch, showNotification, hideNotification } = useApp();
   const [loading, setLoading] = useState({ cities: false, areas: false, contextAreas: false });
   const [isContextModalOpen, setIsContextModalOpen] = useState(false);
+  const [isGeneratedAreasModalOpen, setIsGeneratedAreasModalOpen] = useState(false);
+  const [generatedAreasData, setGeneratedAreasData] = useState<{
+    areas: any[];
+    keywords: string[];
+    cityName: string;
+    countryName: string;
+  }>({ areas: [], keywords: [], cityName: '', countryName: '' });
+  const [areasSearchFilter, setAreasSearchFilter] = useState('');
+
+  // Filter areas by search term
+  const filteredAreas = state.areas.filter(area =>
+    area.name.toLowerCase().includes(areasSearchFilter.toLowerCase())
+  );
 
   useEffect(() => {
     loadCountries();
@@ -152,6 +166,14 @@ export const Dashboard: React.FC = () => {
         const updatedAreas = [...state.areas, ...newAreas];
         dispatch({ type: 'SET_AREAS', payload: updatedAreas });
         
+        // Store generated areas data for the modal
+        setGeneratedAreasData({
+          areas: newAreas,
+          keywords: keywords,
+          cityName: state.selectedCityName,
+          countryName: state.selectedCountry.name
+        });
+        
         showNotification(
           'success',
           'Context Areas Generated',
@@ -161,12 +183,14 @@ export const Dashboard: React.FC = () => {
         setTimeout(hideNotification, 3000);
         
         setIsContextModalOpen(false);
+        // Show the generated areas modal
+        setIsGeneratedAreasModalOpen(true);
       } else {
         throw new Error('No context areas generated');
       }
     } catch (error: any) {
       showNotification(
-        'error',
+        'processing',
         'Context Areas Failed',
         'Failed to generate areas',
         error.message || 'Please check your webhook configuration.'
@@ -367,8 +391,24 @@ export const Dashboard: React.FC = () => {
                 </div>
               </div>
 
+              {/* Areas Search Filter */}
+              <div className="mb-4">
+                <input
+                  type="text"
+                  placeholder="Search areas by name..."
+                  value={areasSearchFilter}
+                  onChange={(e) => setAreasSearchFilter(e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+                {areasSearchFilter && filteredAreas.length !== state.areas.length && (
+                  <p className="text-sm text-gray-600 mt-2">
+                    Showing {filteredAreas.length} of {state.areas.length} areas
+                  </p>
+                )}
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {state.areas.map((area, index) => (
+                {filteredAreas.map((area) => (
                   <div key={area.id} className="rounded-xl border border-gray-200 bg-white p-5 hover:shadow-md transition-all">
                     <div className="flex items-start justify-between mb-3">
                       <div className="p-2 bg-gray-100 rounded-lg"><MapPin className="w-4 h-4 text-gray-700" /></div>
@@ -424,6 +464,16 @@ export const Dashboard: React.FC = () => {
         countryName={state.selectedCountry?.name || ''}
         cityName={state.selectedCityName || ''}
         loading={loading.contextAreas}
+      />
+
+      {/* Generated Areas Modal */}
+      <GeneratedAreasModal
+        isOpen={isGeneratedAreasModalOpen}
+        onClose={() => setIsGeneratedAreasModalOpen(false)}
+        areas={generatedAreasData.areas}
+        keywords={generatedAreasData.keywords}
+        cityName={generatedAreasData.cityName}
+        countryName={generatedAreasData.countryName}
       />
     </div>
   );

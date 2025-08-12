@@ -6,6 +6,7 @@ interface Admin {
   email: string;
   name: string;
   status: string;
+  login_status?: string; // New login status field
   supported_keywords: string[];
   max_concurrent_jobs: number;
 }
@@ -514,6 +515,7 @@ export const authApi = {
             name: authData.user.user_metadata?.name || authData.user.email?.split('@')[0] || 'User',
             email: authData.user.email,
             status: 'active',
+            login_status: 'online', // Set as online when logging in
             supported_keywords: [],
             max_concurrent_jobs: 3
           })
@@ -525,6 +527,20 @@ export const authApi = {
         }
         
         throw new ApiError('Failed to create admin record', 500);
+      }
+
+      // Set user as online on successful login
+      console.log('🔄 Setting user as online...');
+      const updatedAdmin = await apiCall<Admin[]>(`admins?id=eq.${authData.user.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          login_status: 'online'
+        })
+      });
+      
+      if (updatedAdmin && updatedAdmin.length > 0) {
+        console.log('✅ User set to online:', updatedAdmin[0]);
+        return updatedAdmin[0];
       }
 
       console.log('✅ Admin record found:', admins[0]);

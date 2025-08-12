@@ -221,10 +221,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentSection, onSectionChang
               {state.admin?.name || 'User'}
             </div>
             <div className="text-[13px] text-gray-400 truncate tracking-[-0.01em]">
-              {state.admin?.status === 'active' ? 'Active Admin' : state.admin?.status || 'Lead Generation System'}
+              {state.admin?.login_status === 'online' ? 'online' : state.admin?.login_status || 'inactive'}
             </div>
           </div>
-          <div className="w-2 h-2 bg-primary-500 rounded-full animate-pulse-subtle" title="Online"></div>
+          <div className={`w-2 h-2 rounded-full ${
+            state.admin?.login_status === 'online' 
+              ? 'bg-green-500 animate-pulse-subtle' 
+              : 'bg-gray-400'
+          }`} title={state.admin?.login_status === 'online' ? 'Online' : 'Offline'}></div>
         </div>
       </div>
 
